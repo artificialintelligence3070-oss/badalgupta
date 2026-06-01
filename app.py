@@ -1,47 +1,62 @@
-from flask import Flask, jsonify, request
+from flask import Flask, request, jsonify
 import requests
+import json
+from datetime import datetime
 
 app = Flask(__name__)
 
-API_KEY = "ft-rahun2m"
+UPSTREAM_API = "https://ft-osint-api.duckdns.org/api/number"
+UPSTREAM_KEY = "ft-rahun2m"
 
-@app.route("/")
-def home():
-    return jsonify({
-        "owner": "VERNEX",
-        "status": "online"
-    })
+
+def validate_key(user_key):
+    try:
+        with open("keys.json", "r") as f:
+            keys = json.load(f)
+
+        if user_key not in keys:
+            return False
+
+        expiry = datetime.strptime(keys[user_key], "%Y-%m-%d")
+
+        return expiry >= datetime.now()
+
+    except:
+        return False
+
 
 @app.route("/api/number")
-def number():
+def number_lookup():
 
-    num = request.args.get("num")
+    api_key = request.args.get("key")
+    number = request.args.get("num")
 
-    if not num:
-        return jsonify({
-            "status": False,
-            "message": "num parameter required"
-        })
+    if not api_key:
+        return jsonify({"status": False, "message": "API key required"}), 401
 
-    url = f"https://ft-osint-api.duckdns.org/api/number?key={API_KEY}&num={num}"
+    if not validate_key(api_key):
+        return jsonify({"status": False, "message": "Invalid or expired API key"}), 403
 
-    try:
-        r = requests.get(url, timeout=20)
-        data = r.json()
+    response = requests.get(
+        UPSTREAM_API,
+        params={
+            "key": UPSTREAM_KEY,
+            "num": number
+        },
+        timeout=30
+    )
 
-        # Remove branding
-        data.pop("channel", None)
+    data = response.json()
 
-        # Change owner
-        data["by"] = "VERNEX"
+    # Remove branding fields
+    data.pop("by", None)
+    data.pop("channel", None)
 
-        return jsonify(data)
+    # Add your branding
+    data["by"] = "VERNEX"
 
-    except Exception as e:
-        return jsonify({
-            "status": False,
-            "error": str(e)
-        })
+    return jsonify(data)
+
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run()
