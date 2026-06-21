@@ -9,7 +9,6 @@ app = Flask(__name__)
 CORS(app)
 
 # Connect to Vercel KV Redis using Environment Variables
-# Vercel injects KV_URL automatically when you link a KV Database
 KV_URL = os.environ.get("KV_URL", "")
 if KV_URL.startswith("redis://") or KV_URL.startswith("rediss://"):
     db = Redis.from_url(KV_URL, decode_responses=True)
@@ -31,7 +30,8 @@ else:
         def lrange(self, k, s, e): return self.data.get(k, [])[:10]
     db = MockRedis()
 
-TARGET_API_BASE = "https://ft-osint-api.duckdns.org/api/number?key=ft-rahun2m"
+# SWAPPED: Your new main target API key configuration
+TARGET_API_BASE = "https://ft-osint-api.duckdns.org/api/number?key=vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
 
 # --- MANAGEMENT ENDPOINTS ---
 
@@ -42,9 +42,8 @@ def manage_keys():
         name = data.get('name', 'Unnamed Client')
         custom_key = data.get('key', f"custom-{int(time.time())}")
         daily_limit = int(data.get('daily_limit', 100))
-        expire_date = data.get('expire_date', '2030-12-31') # Format YYYY-MM-DD
+        expire_date = data.get('expire_date', '2030-12-31')
         
-        # Save Key schema into database
         db.hset(f"apikey:{custom_key}", mapping={
             "name": name,
             "key": custom_key,
@@ -54,7 +53,6 @@ def manage_keys():
         })
         return jsonify({"success": True, "message": f"Key '{custom_key}' deployed successfully."})
     
-    # GET list of all custom configurations
     all_keys = []
     keys_in_db = db.keys("apikey:*")
     for k in keys_in_db:
@@ -112,10 +110,20 @@ def proxy_number_lookup():
     # 5. Route to Target Infrastructure
     try:
         upstream_url = f"{TARGET_API_BASE}&num={phone_number}"
-        response = requests.get(upstream_url, timeout=10)
-        upstream_data = response.json()
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        response = requests.get(upstream_url, headers=headers, timeout=12)
+        
+        # Safe JSON parse fallback if upstream sends plaintext/HTML errors
+        try:
+            upstream_data = response.json()
+        except Exception:
+            upstream_data = {"raw_response": response.text, "status_code": response.status_code}
+            
     except Exception as e:
-        return jsonify({"error": "Upstream service timeout or parsing failure", "details": str(e)}), 502
+        return jsonify({
+            "error": "Target server infrastructure timeout", 
+            "details": str(e)
+        }), 502
 
     # Increment usage counter safely
     db.set(usage_key, current_usage + 1)
@@ -133,6 +141,5 @@ def proxy_number_lookup():
 
     return jsonify(upstream_data)
 
-# Requirement for local routing context execution
 if __name__ == '__main__':
     app.run(debug=True)
