@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enterprise API Management Gateway</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #05050a; font-family: 'Courier New', Courier, monospace; }
+        .cyber-box {
+            background: rgba(10, 10, 18, 0.85);
+            border: 1px solid #00f0ff;
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.2);
+            backdrop-filter: blur(8px);
+        }
+        .glow-text { text-shadow: 0 0 8px #00f0ff; }
+        canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
+    </style>
+</head>
+<body class="text-gray-100 min-h-screen relative p-4 md:p-8">
+
+    <canvas id="canvas3d"></canvas>
+
+    <div class="max-w-6xl mx-auto z-10 relative">
+        <header class="mb-8 border-b border-cyan-500 pb-4 flex justify-between items-center">
+            <div>
+                <h1 class="text-3xl font-black text-cyan-400 glow-text tracking-widest">SHAYAN EXPLORER HUB</h1>
+                <p class="text-xs text-gray-400 uppercase mt-1">Next-Gen Reverse OSINT Gateway Configuration</p>
+            </div>
+            <div class="text-right">
+                <span class="inline-block px-3 py-1 bg-cyan-950 text-cyan-400 text-xs rounded border border-cyan-500 uppercase tracking-wider animate-pulse">Gateway Node Active</span>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div class="cyber-box p-6 rounded-lg">
+                <h2 class="text-xl font-bold text-cyan-400 mb-4 tracking-wide border-b border-cyan-900 pb-2">🔑 Provision Custom Token</h2>
+                <form id="keyForm" class="space-y-4">
+                    <div>
+                        <label class="block text-xs uppercase tracking-wider text-gray-400 mb-1">Client/Account Name</label>
+                        <input type="text" id="name" required placeholder="e.g., Enterprise Client A" class="w-full bg-slate-950 border border-cyan-800 p-2 text-cyan-400 focus:outline-none focus:border-cyan-400 text-sm rounded">
+                    </div>
+                    <div>
+                        <label class="block text-xs uppercase tracking-wider text-gray-400 mb-1">Custom API Token Key String</label>
+                        <input type="text" id="key" required placeholder="e.g., vip-shayan-99" class="w-full bg-slate-950 border border-cyan-800 p-2 text-cyan-400 focus:outline-none focus:border-cyan-400 text-sm rounded">
+                    </div>
+                    <div>
+                        <label class="block text-xs uppercase tracking-wider text-gray-400 mb-1">Daily Capacity Limit Rate</label>
+                        <input type="number" id="daily_limit" required value="500" class="w-full bg-slate-950 border border-cyan-800 p-2 text-cyan-400 focus:outline-none focus:border-cyan-400 text-sm rounded">
+                    </div>
+                    <div>
+                        <label class="block text-xs uppercase tracking-wider text-gray-400 mb-1">Expiration Timeline Limit</label>
+                        <input type="date" id="expire_date" required value="2027-12-31" class="w-full bg-slate-950 border border-cyan-800 p-2 text-cyan-400 focus:outline-none focus:border-cyan-400 text-sm rounded">
+                    </div>
+                    <button type="submit" class="w-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black p-3 text-xs uppercase tracking-widest rounded transition duration-200">
+                        Deploy Gateway Token to Serverless Engine
+                    </button>
+                </form>
+            </div>
+
+            <div class="lg:col-span-2 space-y-6">
+                <div class="cyber-box p-6 rounded-lg">
+                    <h2 class="text-xl font-bold text-cyan-400 mb-4 tracking-wide border-b border-cyan-900 pb-2">📊 Active Managed Endpoint Assets</h2>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs tracking-wide">
+                            <thead>
+                                <tr class="border-b border-cyan-800 text-cyan-500">
+                                    <th class="pb-2">Client Identity</th>
+                                    <th class="pb-2">Active Secret Key</th>
+                                    <th class="pb-2">Daily Allocation</th>
+                                    <th class="pb-2">Expiration</th>
+                                    <th class="pb-2 text-center">Toggle State</th>
+                                </tr>
+                            </thead>
+                            <tbody id="keysTable" class="divide-y divide-cyan-950">
+                                </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="cyber-box p-6 rounded-lg">
+                    <h2 class="text-xl font-bold text-amber-400 mb-4 tracking-wide border-b border-amber-900 pb-2 glow-text">📡 Real-Time Global Request Stream (Logs)</h2>
+                    <div class="bg-black/80 rounded p-4 h-48 overflow-y-auto text-[11px] font-mono space-y-1 text-emerald-400 border border-emerald-900" id="logsStream">
+                        </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 3D Background Engine ---
+        const canvas = document.getElementById('canvas3d');
+        const ctx = canvas.getContext('2d');
+        let width = canvas.width = window.innerWidth;
+        let height = canvas.height = window.innerHeight;
+
+        window.addEventListener('resize', () => {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        });
+
+        let points = [];
+        for (let i = 0; i < 65; i++) {
+            points.push({
+                x: Math.random() * width,
+                y: Math.random() * height,
+                z: Math.random() * 400,
+                speed: 0.3 + Math.random() * 0.7
+            });
+        }
+
+        function render3DBackground() {
+            ctx.fillStyle = 'rgba(5, 5, 10, 0.15)';
+            ctx.fillRect(0, 0, width, height);
+            ctx.strokeStyle = 'rgba(0, 240, 255, 0.12)';
+            ctx.lineWidth = 1;
+
+            points.forEach((p, idx) => {
+                p.z -= p.speed;
+                if (p.z <= 0) p.z = 400;
+
+                // Simple 3D projection formula transformations
+                const k = 300 / p.z;
+                const px = (p.x - width / 2) * k + width / 2;
+                const py = (p.y - height / 2) * k + height / 2;
+
+                if (px >= 0 && px <= width && py >= 0 && py <= height) {
+                    ctx.fillStyle = `rgba(0, 240, 255, ${1 - p.z / 400})`;
+                    ctx.fillRect(px, py, 2 * k, 2 * k);
+
+                    // Draw connect lines to make a neural matrix web mesh grid
+                    if (idx < points.length - 1) {
+                        const nextK = 300 / points[idx+1].z;
+                        const nx = (points[idx+1].x - width/2) * nextK + width/2;
+                        const ny = (points[idx+1].y - height/2) * nextK + height/2;
+                        if(Math.abs(px - nx) < 180) {
+                            ctx.beginPath();
+                            ctx.moveTo(px, py);
+                            ctx.lineTo(nx, ny);
+                            ctx.stroke();
+                        }
+                    }
+                }
+            });
+            requestAnimationFrame(render3DBackground);
+        }
+        render3DBackground();
+
+        // --- Core Endpoint Dashboard Actions ---
+        const API_BASE = window.location.origin;
+
+        async function fetchSystemData() {
+            try {
+                // Fetch Configurations
+                const keysRes = await fetch(`${API_BASE}/api/admin/keys`);
+                const keysData = await keysRes.json();
+                const tableBody = document.getElementById('keysTable');
+                tableBody.innerHTML = '';
+                
+                keysData.keys.forEach(k => {
+                    const statusClass = k.status === 'on' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500' : 'bg-rose-500/20 text-rose-400 border-rose-500';
+                    tableBody.innerHTML += `
+                        <tr class="hover:bg-cyan-950/20 transition">
+                            <td class="py-3 text-cyan-300 font-bold">${k.name}</td>
+                            <td class="py-3 text-gray-300"><code class="bg-slate-900 px-2 py-0.5 rounded text-cyan-400 border border-cyan-950">${k.key}</code></td>
+                            <td class="py-3 text-gray-300">${k.daily_limit} reqs/day</td>
+                            <td class="py-3 text-gray-400">${k.expire_date}</td>
+                            <td class="py-3 text-center">
+                                <button onclick="toggleKeyStatus('${k.key}', '${k.status}')" class="px-2 py-1 rounded border text-[10px] uppercase font-bold transition duration-150 ${statusClass}">
+                                    ● Internal Switch: ${k.status}
+                                </button>
+                            </td>
+                        </tr>`;
+                });
+
+                // Fetch Infrastructure Log Streams
+                const historyRes = await fetch(`${API_BASE}/api/admin/history`);
+                const historyData = await historyRes.json();
+                const logsBox = document.getElementById('logsStream');
+                logsBox.innerHTML = historyData.history.length === 0 ? '> Initialized console connection: Awaiting upstream pipeline triggers...' : '';
+                
+                historyData.history.forEach(log => {
+                    logsBox.innerHTML += `<div>[${log.timestamp}] TRACE // Token: "${log.key_used}" (${log.client_name}) parsed number metadata [${log.queried_num}] -> Code ${log.status_code}</div>`;
+                });
+            } catch (err) {
+                console.error("Dashboard out of sync with Vercel Serverless runtime edge: ", err);
+            }
+        }
+
+        document.getElementById('keyForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payload = {
+                name: document.getElementById('name').value,
+                key: document.getElementById('key').value,
+                daily_limit: document.getElementById('daily_limit').value,
+                expire_date: document.getElementById('expire_date').value
+            };
+
+            await fetch(`${API_BASE}/api/admin/keys`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            document.getElementById('keyForm').reset();
+            fetchSystemData();
+        });
+
+        async function toggleKeyStatus(keyName, currentStatus) {
+            await fetch(`${API_BASE}/api/admin/toggle`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: keyName, status: currentStatus })
+            });
+            fetchSystemData();
+        }
+
+        // Keep system UI metrics alive in 5-second polling loop
+        fetchSystemData();
+        setInterval(fetchSystemData, 5000);
+    </script>
+</body>
+</html>
