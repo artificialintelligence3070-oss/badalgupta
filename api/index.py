@@ -34,22 +34,33 @@ else:
 # Your main target API key configuration
 TARGET_API_BASE = "https://ft-osint-api.duckdns.org/api/number?key=vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
 
-# Helper function to deep-clean branding from the upstream dictionary/list data
+# Enhanced branding deep-cleaner to wipe out the old credentials completely
 def clean_branding_data(data):
-    # Convert data to string representation to perform a blanket find-and-replace
+    # Convert data dictionary to a raw string for full find-and-replace masking
     data_str = json.dumps(data)
     
-    # Target replacements: Remove the old tags/channels and replace with Vernex
+    # Clean the author fields (handles case sensitivity variations)
+    data_str = data_str.replace("@ftgamer2", "Vernex")
     data_str = data_str.replace("@FTgamer2", "Vernex")
     data_str = data_str.replace("FTgamer2", "Vernex")
-    data_str = data_str.replace("FT gamer2", "Vernex")
+    data_str = data_str.replace("ftgamer2", "Vernex")
     
-    # Common channel layouts/URLs that might show up in text fields
-    data_str = data_str.replace("https://t.me/FTgamer2", "https://t.me/Vernex")
-    data_str = data_str.replace("t.me/FTgamer2", "t.me/Vernex")
+    # Wipe out the old channel link and clean up Telegram mentions
+    data_str = data_str.replace("https://t.me/lynx_api", "https://t.me/vernex_api")
+    data_str = data_str.replace("t.me/lynx_api", "t.me/vernex_api")
+    data_str = data_str.replace("https://t.me/FTgamer2", "https://t.me/vernex_api")
     
-    # Return parsed data back to clean python dictionary format
-    return json.loads(data_str)
+    # Parse back into a structural Python dictionary
+    cleaned_dict = json.loads(data_str)
+    
+    # Double check assurance: explicitly force the "by" key if present in the root layer
+    if isinstance(cleaned_dict, dict):
+        if "by" in cleaned_dict:
+            cleaned_dict["by"] = "Vernex"
+        if "channel" in cleaned_dict and "lynx_api" in str(cleaned_dict["channel"]):
+            cleaned_dict["channel"] = "https://t.me/vernex_api"
+            
+    return cleaned_dict
 
 # --- MANAGEMENT ENDPOINTS ---
 
@@ -133,11 +144,12 @@ def proxy_number_lookup():
         # Safe JSON parse fallback if upstream sends plaintext/HTML errors
         try:
             upstream_data = response.json()
-            # Clean out old branding elements and apply your "Vernex" identity
+            # Run the deep-cleaning operation
             upstream_data = clean_branding_data(upstream_data)
         except Exception:
-            # Fallback text cleaner if raw response format isn't structured JSON
-            raw_cleaned = response.text.replace("@FTgamer2", "Vernex").replace("FTgamer2", "Vernex")
+            # Fallback string manipulation if response isn't formatted properly
+            raw_cleaned = response.text.replace("@ftgamer2", "Vernex").replace("@FTgamer2", "Vernex")
+            raw_cleaned = raw_cleaned.replace("https://t.me/lynx_api", "https://t.me/vernex_api")
             upstream_data = {"raw_response": raw_cleaned, "status_code": response.status_code}
             
     except Exception as e:
