@@ -1,5 +1,6 @@
 import os
 import time
+import json
 import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -30,8 +31,25 @@ else:
         def lrange(self, k, s, e): return self.data.get(k, [])[:10]
     db = MockRedis()
 
-# SWAPPED: Your new main target API key configuration
+# Your main target API key configuration
 TARGET_API_BASE = "https://ft-osint-api.duckdns.org/api/number?key=vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
+
+# Helper function to deep-clean branding from the upstream dictionary/list data
+def clean_branding_data(data):
+    # Convert data to string representation to perform a blanket find-and-replace
+    data_str = json.dumps(data)
+    
+    # Target replacements: Remove the old tags/channels and replace with Vernex
+    data_str = data_str.replace("@FTgamer2", "Vernex")
+    data_str = data_str.replace("FTgamer2", "Vernex")
+    data_str = data_str.replace("FT gamer2", "Vernex")
+    
+    # Common channel layouts/URLs that might show up in text fields
+    data_str = data_str.replace("https://t.me/FTgamer2", "https://t.me/Vernex")
+    data_str = data_str.replace("t.me/FTgamer2", "t.me/Vernex")
+    
+    # Return parsed data back to clean python dictionary format
+    return json.loads(data_str)
 
 # --- MANAGEMENT ENDPOINTS ---
 
@@ -71,7 +89,6 @@ def toggle_key():
 @app.route('/api/admin/history', methods=['GET'])
 def get_global_history():
     logs = db.lrange("api:history", 0, 49) or []
-    import json
     return jsonify({"history": [json.loads(x) for x in logs]})
 
 
@@ -116,8 +133,12 @@ def proxy_number_lookup():
         # Safe JSON parse fallback if upstream sends plaintext/HTML errors
         try:
             upstream_data = response.json()
+            # Clean out old branding elements and apply your "Vernex" identity
+            upstream_data = clean_branding_data(upstream_data)
         except Exception:
-            upstream_data = {"raw_response": response.text, "status_code": response.status_code}
+            # Fallback text cleaner if raw response format isn't structured JSON
+            raw_cleaned = response.text.replace("@FTgamer2", "Vernex").replace("FTgamer2", "Vernex")
+            upstream_data = {"raw_response": raw_cleaned, "status_code": response.status_code}
             
     except Exception as e:
         return jsonify({
@@ -129,7 +150,6 @@ def proxy_number_lookup():
     db.set(usage_key, current_usage + 1)
     
     # 6. Log transaction history trace
-    import json
     log_entry = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "key_used": client_key,
