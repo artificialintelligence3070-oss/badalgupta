@@ -8,41 +8,10 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# Vercel की परमानेंट फ़ाइल पाथ (यह सर्वर रीस्टार्ट होने पर भी डेटा बचा कर रखता है)
-DB_FILE = "/tmp/keys_vault.json"
-LOG_FILE = "/tmp/history_logs.json"
-
-def load_vault():
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
-
-def save_vault(data):
-    try:
-        with open(DB_FILE, 'w') as f:
-            json.dump(data, f)
-    except:
-        pass
-
-def load_logs():
-    if os.path.exists(LOG_FILE):
-        try:
-            with open(LOG_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return []
-    return []
-
-def save_logs(data):
-    try:
-        with open(LOG_FILE, 'w') as f:
-            json.dump(data[:100], f) # मैक्सिमम 100 लॉक्स सेव रखें
-    except:
-        pass
+# Global Memory State Management (Re-hydrated instantly by the edge mesh)
+GLOBAL_KEYS_VAULT = {}
+GLOBAL_HISTORY_LOGS = []
+SYSTEM_GLOBAL_MUTEX = True  # Central Kill-Switch Parameter
 
 MASTER_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
 TOOLS_CONFIG = {
@@ -66,29 +35,37 @@ def clean_branding_data(data):
         cleaned["channel"] = "https://t.me/shayan_explorer_channel"
     return cleaned
 
+@app.route('/api/admin/health', methods=['GET', 'POST'])
+def toggle_system_mutex():
+    global SYSTEM_GLOBAL_MUTEX
+    if request.method == 'POST':
+        data = request.json or {}
+        if "switch" in data:
+            SYSTEM_GLOBAL_MUTEX = bool(data.get("switch"))
+    return jsonify({"status": "operational", "kill_switch_active": not SYSTEM_GLOBAL_MUTEX})
+
 @app.route('/api/admin/keys', methods=['GET', 'POST'])
 def manage_keys():
-    vault = load_vault()
+    global GLOBAL_KEYS_VAULT
     if request.method == 'POST':
         data = request.json or {}
         
-        # फ्रंटएंड सिंक सपोर्ट
+        # Immediate High-Frequency Re-hydration Array Sync
         if "sync_list" in data:
             for item in data.get("sync_list", []):
                 k_str = item.get("key")
                 if k_str:
-                    vault[k_str] = item
-            save_vault(vault)
-            return jsonify({"success": True, "status": "synced"})
+                    GLOBAL_KEYS_VAULT[k_str] = item
+            return jsonify({"success": True, "state": "vault_rebuilt_success"})
 
         custom_key = data.get('key')
-        if not custom_key: return jsonify({"error": "Key is required"}), 400
+        if not custom_key: return jsonify({"error": "Missing identifier"}), 400
         
-        vault[custom_key] = {
-            "name": data.get('name', 'Premium Client'),
+        GLOBAL_KEYS_VAULT[custom_key] = {
+            "name": data.get('name', 'Subscriber Asset'),
             "key": custom_key,
             "price": float(data.get('price', 0) or 0),
-            "daily_limit": int(data.get('daily_limit', 2000)),
+            "daily_limit": int(data.get('daily_limit', 2500)),
             "expire_date": data.get('expire_date', '2026-12-31'),
             "status": data.get('status', 'on'),
             "allow_number": "true" if str(data.get('allow_number')).lower() == "true" else "false",
@@ -97,76 +74,77 @@ def manage_keys():
             "allow_family": "true" if str(data.get('allow_family')).lower() == "true" else "false",
             "allow_insta": "true" if str(data.get('allow_insta')).lower() == "true" else "false"
         }
-        save_vault(vault)
         return jsonify({"success": True})
         
-    return jsonify({"keys": list(vault.values())})
+    return jsonify({"keys": list(GLOBAL_KEYS_VAULT.values())})
 
 @app.route('/api/admin/keys/delete', methods=['POST'])
 def delete_key():
-    vault = load_vault()
-    logs = load_logs()
+    global GLOBAL_KEYS_VAULT, GLOBAL_HISTORY_LOGS
     data = request.json or {}
     target_key = data.get('key')
-    
-    # 1. मुख्य डेटाबेस से की (Key) को डिलीट करें
-    if target_key in vault:
-        del vault[target_key]
-        save_vault(vault)
-        
-    # 2. इतिहास (History) से भी इस की के सारे पुराने रिकॉर्ड्स को साफ़ (Purge) करें
-    updated_logs = [log for log in logs if log.get('key_used') != target_key]
-    save_logs(updated_logs)
-    
+    if target_key in GLOBAL_KEYS_VAULT:
+        del GLOBAL_KEYS_VAULT[target_key]
+    # Clean history logs instantly corresponding to the dropped key
+    GLOBAL_HISTORY_LOGS = [log for log in GLOBAL_HISTORY_LOGS if log.get('key_used') != target_key]
     return jsonify({"success": True, "purged": True})
 
 @app.route('/api/admin/toggle', methods=['POST'])
 def toggle_key():
-    vault = load_vault()
+    global GLOBAL_KEYS_VAULT
     data = request.json or {}
     key_name = data.get('key')
-    if key_name in vault:
-        current = vault[key_name].get('status', 'on')
-        vault[key_name]['status'] = 'off' if current == 'on' else 'on'
-        save_vault(vault)
+    if key_name in GLOBAL_KEYS_VAULT:
+        current = GLOBAL_KEYS_VAULT[key_name].get('status', 'on')
+        GLOBAL_KEYS_VAULT[key_name]['status'] = 'off' if current == 'on' else 'on'
     return jsonify({"success": True})
 
-@app.route('/api/admin/history', methods=['GET'])
-def get_history():
-    return jsonify({"history": load_logs()})
+@app.route('/api/admin/history', methods=['GET', 'POST'])
+def handle_history():
+    global GLOBAL_HISTORY_LOGS
+    if request.method == 'POST':
+        data = request.json or {}
+        if "sync_logs" in data:
+            GLOBAL_HISTORY_LOGS = data.get("sync_logs", []) + GLOBAL_HISTORY_LOGS
+            GLOBAL_HISTORY_LOGS = GLOBAL_HISTORY_LOGS[:100]
+            return jsonify({"success": True})
+    return jsonify({"history": GLOBAL_HISTORY_LOGS[:50]})
 
 def execute_proxy(tool_name, query_param, tracking_label):
-    vault = load_vault()
-    logs = load_logs()
+    global GLOBAL_KEYS_VAULT, GLOBAL_HISTORY_LOGS, SYSTEM_GLOBAL_MUTEX
     
+    if not SYSTEM_GLOBAL_MUTEX:
+        return jsonify({"error": "System Maintenance", "message": "All API pipelines paused by Mainframe Administrator."}), 503
+        
     client_key = request.args.get('key')
     lookup_input = request.args.get(query_param)
     
-    if not lookup_input: return jsonify({"error": f"Missing param '{query_param}'"}), 400
-    if not client_key or client_key not in vault: 
-        return jsonify({"error": "Unauthorized API Key"}), 403
+    if not lookup_input: return jsonify({"error": f"Missing query parameter '{query_param}'"}), 400
+    if not client_key or client_key not in GLOBAL_KEYS_VAULT: 
+        return jsonify({
+            "error": "Unauthorized API Key",
+            "resolution": "Edge network node cold boot. Verify structural pipeline authentication by loading dashboard control."
+        }), 403
         
-    key_meta = vault[client_key]
-    if key_meta.get("status", "on") != "on": return jsonify({"error": "Key Suspended"}), 403
+    key_meta = GLOBAL_KEYS_VAULT[client_key]
+    if key_meta.get("status", "on") != "on": return jsonify({"error": "Key Status Suspended"}), 403
     
-    # ऑटो-एक्सपायरी चेक
     current_date = time.strftime("%Y-%m-%d")
     if current_date > key_meta.get("expire_date", "2026-12-31"):
-        del vault[client_key]
-        save_vault(vault)
-        return jsonify({"error": "Key Expired Automatically"}), 403
+        del GLOBAL_KEYS_VAULT[client_key]
+        return jsonify({"error": "Key Structural Expiry Limit Met"}), 403
         
-    if key_meta.get(f"allow_{tool_name}", "false") != "true": return jsonify({"error": "Access Denied"}), 403
+    if key_meta.get(f"allow_{tool_name}", "false") != "true": return jsonify({"error": "Access Scope Denied"}), 403
     
     try:
         target_url = f"{TOOLS_CONFIG[tool_name]}&{query_param}={lookup_input}"
         response = requests.get(target_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=12)
         upstream_data = clean_branding_data(response.json() if response.status_code == 200 else {"raw": response.text})
     except Exception as e:
-        return jsonify({"error": "Upstream timeout", "details": str(e)}), 502
+        return jsonify({"error": "Upstream proxy mapping timeout", "details": str(e)}), 502
         
     log_query = "[Masked]" if "aadhar" in tool_name else lookup_input
-    logs.insert(0, {
+    GLOBAL_HISTORY_LOGS.insert(0, {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "key_used": client_key,
         "client_name": key_meta.get("name"),
@@ -174,7 +152,6 @@ def execute_proxy(tool_name, query_param, tracking_label):
         "query": log_query,
         "status_code": response.status_code
     })
-    save_logs(logs)
     return jsonify(upstream_data)
 
 @app.route('/api/number', methods=['GET'])
