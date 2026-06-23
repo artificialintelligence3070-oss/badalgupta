@@ -66,7 +66,7 @@
                                 <th class="pb-3">Token Private Key</th>
                                 <th class="pb-3">Scope Permissions</th>
                                 <th class="pb-3">Price</th>
-                                <th class="pb-3">Dynamic Time Left Countdown</th>
+                                <th class="pb-3">Live Countdown Timer</th>
                                 <th class="pb-3 text-center">Operational Actions</th>
                             </tr>
                         </thead>
@@ -152,7 +152,8 @@
                 document.getElementById(`m-nav-${v}`).classList.add('text-slate-400');
             });
             document.getElementById(`view-${viewId}`).classList.remove('hidden');
-            document.getElementById(`nav-${viewId}`).add ? document.getElementById(`nav-${viewId}`).add('sidebar-item-active') : document.getElementById(`nav-${viewId}`).classList.add('sidebar-item-active');
+            const dtNav = document.getElementById(`nav-${viewId}`);
+            if (dtNav) dtNav.classList.add('sidebar-item-active');
             document.getElementById(`m-nav-${viewId}`).classList.remove('text-slate-400');
             document.getElementById(`m-nav-${viewId}`).classList.add('nav-item-active', 'text-cyan-400');
             if(viewId === 'dash' || viewId === 'logs') syncSystemData();
@@ -160,7 +161,7 @@
 
         function computeLiveCountdown(targetDateStr) {
             const delta = Date.parse(targetDateStr + "T23:59:59") - Date.parse(new Date());
-            if (delta <= 0) return `<span class="text-rose-500 font-bold">EXPIRED</span>`;
+            if (delta <= 0) return `<span class="text-rose-500 font-bold animate-pulse">EXPIRED</span>`;
             
             const seconds = Math.floor((delta / 1000) % 60);
             const minutes = Math.floor((delta / 1000 / 60) % 60);
@@ -177,6 +178,11 @@
                 const txt = computeLiveCountdown(k.expire_date);
                 if (dCell) dCell.innerHTML = txt;
                 if (mCell) mCell.innerHTML = txt;
+                
+                // अगर की एक्सपायर हो चुकी है, तो बैकएंड को बिना फ्रंटएंड के भी सिंक रखने के लिए रीलोड मारें
+                if(Date.parse(k.expire_date + "T23:59:59") - Date.parse(new Date()) <= 0) {
+                     // Auto-cleanup internal triggers
+                }
             });
         }
 
@@ -187,6 +193,9 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ key: targetKeyStr })
                 });
+                let localVault = JSON.parse(localStorage.getItem('shayan_vault_v3') || '[]');
+                localVault = localVault.filter(x => x.key !== targetKeyStr);
+                localStorage.setItem('shayan_vault_v3', JSON.stringify(localVault));
                 syncSystemData();
             }
         }
@@ -197,6 +206,9 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ key: keyName, status: currentStatus })
             });
+            let localVault = JSON.parse(localStorage.getItem('shayan_vault_v3') || '[]');
+            localVault.forEach(x => { if(x.key === keyName) x.status = (currentStatus === 'on' ? 'off' : 'on'); });
+            localStorage.setItem('shayan_vault_v3', JSON.stringify(localVault));
             syncSystemData();
         }
 
@@ -204,8 +216,30 @@
             try {
                 const res = await fetch(`${API_BASE}/api/admin/keys`);
                 const data = await res.json();
-                cachedKeys = data.keys || [];
-            } catch(e){}
+                
+                // --- ANTI VANISH AUTO-SYNC SYSTEM ---
+                if (data && data.keys && data.keys.length > 0) {
+                    cachedKeys = data.keys;
+                    localStorage.setItem('shayan_vault_v3', JSON.stringify(cachedKeys));
+                } else {
+                    // अगर Vercel रीस्टार्ट हो गया है, तो तुरंत लोकल स्टोरेज से बैकअप को वापस सर्वर पर अपलोड करें!
+                    let backup = JSON.parse(localStorage.getItem('shayan_vault_v3') || '[]');
+                    if(backup.length > 0) {
+                        await fetch(`${API_BASE}/api/admin/keys`, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ sync_list: backup })
+                        });
+                        cachedKeys = backup;
+                    }
+                }
+            } catch(e){
+                cachedKeys = JSON.parse(localStorage.getItem('shayan_vault_v3') || '[]');
+            }
+
+            // एक्सपायर्ड कीज़ को फ़िल्टर आउट करें
+            const todayStr = new Date().toISOString().split('T')[0];
+            cachedKeys = cachedKeys.filter(k => k.expire_date >= todayStr);
 
             let revenue = 0;
             cachedKeys.forEach(x => { if(x.status === 'on') revenue += parseFloat(x.price || 0); });
@@ -224,7 +258,7 @@
                     <tr class="border-b border-slate-900">
                         <td class="py-4 font-bold text-slate-300">${k.name}</td>
                         <td class="py-4"><code class="text-cyan-400 bg-slate-950 px-2 py-0.5 rounded">${k.key}</code></td>
-                        <td class="py-4 text-slate-500">Active Scope Matrix</td>
+                        <td class="py-4 text-slate-500">Active Pipeline Scope</td>
                         <td class="py-4 text-slate-400">₹${k.price}</td>
                         <td class="py-4 font-bold text-cyan-400" id="timer-d-${k.key}">${computeLiveCountdown(k.expire_date)}</td>
                         <td class="py-4 text-center space-x-2">
@@ -284,6 +318,10 @@
                 body: JSON.stringify(newKeyObj)
             });
 
+            let localVault = JSON.parse(localStorage.getItem('shayan_vault_v3') || '[]');
+            localVault.push(newKeyObj);
+            localStorage.setItem('shayan_vault_v3', JSON.stringify(localVault));
+
             document.getElementById('keyForm').reset();
             setAdaptive2026Date();
             switchView('dash');
@@ -292,7 +330,7 @@
         window.onload = () => {
             setAdaptive2026Date();
             syncSystemData();
-            setInterval(syncSystemData, 10000);
+            setInterval(syncSystemData, 6000);
             setInterval(runLiveClockTicker, 1000);
         };
     </script>
