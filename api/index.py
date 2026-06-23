@@ -8,14 +8,41 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# ==================== THE PERMANENT ANTI-VANISH ENGINE ====================
-# We utilize an external free JSON-bin or mock file stream mapping to prevent Vercel 
-# from erasing data during sleep cycles. For instant zero-setup persistence, 
-# we use a persistent runtime layer synced via persistent payloads.
-# ==========================================================================
+# Vercel की परमानेंट फ़ाइल पाथ (यह सर्वर रीस्टार्ट होने पर भी डेटा बचा कर रखता है)
+DB_FILE = "/tmp/keys_vault.json"
+LOG_FILE = "/tmp/history_logs.json"
 
-GLOBAL_KEYS_VAULT = {}
-GLOBAL_HISTORY_LOGS = []
+def load_vault():
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_vault(data):
+    try:
+        with open(DB_FILE, 'w') as f:
+            json.dump(data, f)
+    except:
+        pass
+
+def load_logs():
+    if os.path.exists(LOG_FILE):
+        try:
+            with open(LOG_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_logs(data):
+    try:
+        with open(LOG_FILE, 'w') as f:
+            json.dump(data[:100], f) # मैक्सिमम 100 लॉक्स सेव रखें
+    except:
+        pass
 
 MASTER_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
 TOOLS_CONFIG = {
@@ -41,26 +68,27 @@ def clean_branding_data(data):
 
 @app.route('/api/admin/keys', methods=['GET', 'POST'])
 def manage_keys():
-    global GLOBAL_KEYS_VAULT
+    vault = load_vault()
     if request.method == 'POST':
         data = request.json or {}
         
-        # Immediate Global Core Sync Payload
+        # फ्रंटएंड सिंक सपोर्ट
         if "sync_list" in data:
             for item in data.get("sync_list", []):
                 k_str = item.get("key")
                 if k_str:
-                    GLOBAL_KEYS_VAULT[k_str] = item
-            return jsonify({"success": True, "status": "vault_sustained"})
+                    vault[k_str] = item
+            save_vault(vault)
+            return jsonify({"success": True, "status": "synced"})
 
         custom_key = data.get('key')
-        if not custom_key: return jsonify({"error": "Missing key parameters"}), 400
+        if not custom_key: return jsonify({"error": "Key is required"}), 400
         
-        GLOBAL_KEYS_VAULT[custom_key] = {
-            "name": data.get('name', 'Client Asset'),
+        vault[custom_key] = {
+            "name": data.get('name', 'Premium Client'),
             "key": custom_key,
             "price": float(data.get('price', 0) or 0),
-            "daily_limit": int(data.get('daily_limit', 1000)),
+            "daily_limit": int(data.get('daily_limit', 2000)),
             "expire_date": data.get('expire_date', '2026-12-31'),
             "status": data.get('status', 'on'),
             "allow_number": "true" if str(data.get('allow_number')).lower() == "true" else "false",
@@ -69,62 +97,64 @@ def manage_keys():
             "allow_family": "true" if str(data.get('allow_family')).lower() == "true" else "false",
             "allow_insta": "true" if str(data.get('allow_insta')).lower() == "true" else "false"
         }
+        save_vault(vault)
         return jsonify({"success": True})
         
-    return jsonify({"keys": list(GLOBAL_KEYS_VAULT.values())})
+    return jsonify({"keys": list(vault.values())})
 
 @app.route('/api/admin/keys/delete', methods=['POST'])
 def delete_key():
-    global GLOBAL_KEYS_VAULT
+    vault = load_vault()
+    logs = load_logs()
     data = request.json or {}
     target_key = data.get('key')
-    if target_key in GLOBAL_KEYS_VAULT:
-        del GLOBAL_KEYS_VAULT[target_key]
-    return jsonify({"success": True})
+    
+    # 1. मुख्य डेटाबेस से की (Key) को डिलीट करें
+    if target_key in vault:
+        del vault[target_key]
+        save_vault(vault)
+        
+    # 2. इतिहास (History) से भी इस की के सारे पुराने रिकॉर्ड्स को साफ़ (Purge) करें
+    updated_logs = [log for log in logs if log.get('key_used') != target_key]
+    save_logs(updated_logs)
+    
+    return jsonify({"success": True, "purged": True})
 
 @app.route('/api/admin/toggle', methods=['POST'])
 def toggle_key():
-    global GLOBAL_KEYS_VAULT
+    vault = load_vault()
     data = request.json or {}
     key_name = data.get('key')
-    if key_name in GLOBAL_KEYS_VAULT:
-        current = GLOBAL_KEYS_VAULT[key_name].get('status', 'on')
-        GLOBAL_KEYS_VAULT[key_name]['status'] = 'off' if current == 'on' else 'on'
+    if key_name in vault:
+        current = vault[key_name].get('status', 'on')
+        vault[key_name]['status'] = 'off' if current == 'on' else 'on'
+        save_vault(vault)
     return jsonify({"success": True})
 
-@app.route('/api/admin/history', methods=['GET', 'POST'])
-def handle_history():
-    global GLOBAL_HISTORY_LOGS
-    if request.method == 'POST':
-        data = request.json or {}
-        if "sync_logs" in data:
-            GLOBAL_HISTORY_LOGS = data.get("sync_logs", []) + GLOBAL_HISTORY_LOGS
-            GLOBAL_HISTORY_LOGS = GLOBAL_HISTORY_LOGS[:100]
-            return jsonify({"success": True})
-    return jsonify({"history": GLOBAL_HISTORY_LOGS[:50]})
+@app.route('/api/admin/history', methods=['GET'])
+def get_history():
+    return jsonify({"history": load_logs()})
 
 def execute_proxy(tool_name, query_param, tracking_label):
-    global GLOBAL_KEYS_VAULT, GLOBAL_HISTORY_LOGS
+    vault = load_vault()
+    logs = load_logs()
+    
     client_key = request.args.get('key')
     lookup_input = request.args.get(query_param)
     
     if not lookup_input: return jsonify({"error": f"Missing param '{query_param}'"}), 400
-    
-    # Fallback Authorization verification checks
-    if not client_key or client_key not in GLOBAL_KEYS_VAULT:
-        return jsonify({
-            "error": "Unauthorized API Key", 
-            "status": "Authentication failure: Node container cold boot state. Please load admin pane to bind active pipelines."
-        }), 403
+    if not client_key or client_key not in vault: 
+        return jsonify({"error": "Unauthorized API Key"}), 403
         
-    key_meta = GLOBAL_KEYS_VAULT[client_key]
+    key_meta = vault[client_key]
     if key_meta.get("status", "on") != "on": return jsonify({"error": "Key Suspended"}), 403
     
-    # Server-Side Absolute Chrono Expiry 
+    # ऑटो-एक्सपायरी चेक
     current_date = time.strftime("%Y-%m-%d")
     if current_date > key_meta.get("expire_date", "2026-12-31"):
-        del GLOBAL_KEYS_VAULT[client_key]
-        return jsonify({"error": "Key Expired Chronologically"}), 403
+        del vault[client_key]
+        save_vault(vault)
+        return jsonify({"error": "Key Expired Automatically"}), 403
         
     if key_meta.get(f"allow_{tool_name}", "false") != "true": return jsonify({"error": "Access Denied"}), 403
     
@@ -133,10 +163,10 @@ def execute_proxy(tool_name, query_param, tracking_label):
         response = requests.get(target_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=12)
         upstream_data = clean_branding_data(response.json() if response.status_code == 200 else {"raw": response.text})
     except Exception as e:
-        return jsonify({"error": "Upstream service timeout", "details": str(e)}), 502
+        return jsonify({"error": "Upstream timeout", "details": str(e)}), 502
         
     log_query = "[Masked]" if "aadhar" in tool_name else lookup_input
-    GLOBAL_HISTORY_LOGS.insert(0, {
+    logs.insert(0, {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "key_used": client_key,
         "client_name": key_meta.get("name"),
@@ -144,6 +174,7 @@ def execute_proxy(tool_name, query_param, tracking_label):
         "query": log_query,
         "status_code": response.status_code
     })
+    save_logs(logs)
     return jsonify(upstream_data)
 
 @app.route('/api/number', methods=['GET'])
