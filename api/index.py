@@ -9,33 +9,61 @@ from redis import Redis
 app = Flask(__name__)
 CORS(app)
 
+# --- PERMANENT STORAGE ENGINE ---
+# Vercel Serverless क्लस्टर स्लीप मोड में जाने पर भी डेटा सुरक्षित रखने के लिए फ़ाइल बैकअप पाथ
+LOCAL_FILE_DB = "/tmp/shayan_keys_vault.json"
+
+def load_local_vault():
+    if os.path.exists(LOCAL_FILE_DB):
+        try:
+            with open(LOCAL_FILE_DB, 'r') as f:
+                return json.load(f)
+        except: return {}
+    return {}
+
+def save_local_vault(data):
+    try:
+        with open(LOCAL_FILE_DB, 'w') as f:
+            json.dump(data, f)
+    except: pass
+
 KV_URL = os.environ.get("KV_URL", "")
 if KV_URL.startswith("redis://") or KV_URL.startswith("rediss://"):
     db = Redis.from_url(KV_URL, decode_responses=True)
+    is_redis = True
 else:
-    class MockRedis:
-        def __init__(self): self.data = {}
+    is_redis = False
+    class MockRedisEngine:
+        def __init__(self):
+            self.data = load_local_vault()
         def get(self, k): return self.data.get(k)
-        def set(self, k, v): self.data[k] = str(v); return True
+        def set(self, k, v): 
+            self.data[k] = str(v)
+            save_local_vault(self.data)
+            return True
         def hgetall(self, k): return self.data.get(k, {})
         def hset(self, k, mapping=None):
             if k not in self.data: self.data[k] = {}
             if mapping: self.data[k].update(mapping)
+            save_local_vault(self.data)
             return len(mapping)
-        def hdel(self, k, field):
-            if k in self.data and field in self.data[k]:
-                del self.data[k][field]; return 1
-            return 0
         def del_key(self, k):
-            if k in self.data: del self.data[k]; return 1
+            if k in self.data: 
+                del self.data[k]
+                save_local_vault(self.data)
+                return 1
             return 0
-        def keys(self, p): return [k for k in self.data.keys() if k.startswith(p.replace('*',''))]
+        def keys(self, p): 
+            prefix = p.replace('*', '')
+            return [k for k in self.data.keys() if k.startswith(prefix)]
         def lpush(self, k, v):
             if k not in self.data: self.data[k] = []
             self.data[k].insert(0, v)
+            save_local_vault(self.data)
         def lrange(self, k, s, e): return self.data.get(k, [])[:50]
-    db = MockRedis()
+    db = MockRedisEngine()
 
+# Master Source Core Links Configuration
 MASTER_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
 TOOLS_CONFIG = {
     "number": f"https://ft-osint-api.duckdns.org/api/number?key={MASTER_KEY}",
@@ -90,10 +118,10 @@ def manage_keys():
 def delete_key():
     data = request.json or {}
     target_key = data.get('key')
-    if hasattr(db, 'del_key'):
-        db.del_key(f"apikey:{target_key}")
-    else:
+    if is_redis:
         db.delete(f"apikey:{target_key}")
+    else:
+        db.del_key(f"apikey:{target_key}")
     return jsonify({"success": True, "message": "Cluster Purged Successfully"})
 
 @app.route('/api/admin/toggle', methods=['POST'])
@@ -115,10 +143,17 @@ def execute_proxy(tool_name, query_param, tracking_label):
     lookup_input = request.args.get(query_param)
     if not lookup_input: return jsonify({"error": f"Missing parameter '{query_param}'"}), 400
     
-    # की-वैलिडेशन लॉजिक सीधे डेटाबेस मैपिंग से
     key_meta = db.hgetall(f"apikey:{client_key}")
     if not key_meta: return jsonify({"error": "Unauthorized API Key"}), 403
     if key_meta.get("status", "on") != "on": return jsonify({"error": "Key Suspended"}), 403
+    
+    # टाइमर चेकिंग सीधे सर्वर साइड पर बैकग्राउंड ऑपरेशन्स के लिए
+    current_date = time.strftime("%Y-%m-%d")
+    if current_date > key_meta.get("expire_date", "2026-12-31"):
+        if is_redis: db.delete(f"apikey:{client_key}")
+        else: db.del_key(f"apikey:{client_key}")
+        return jsonify({"error": "Key Expired automatically in background"}), 403
+        
     if key_meta.get(f"allow_{tool_name}", "false") != "true": return jsonify({"error": "Access Denied"}), 403
     
     try:
