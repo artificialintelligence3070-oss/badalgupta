@@ -4,66 +4,15 @@ import json
 import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from redis import Redis
 
 app = Flask(__name__)
 CORS(app)
 
-# --- PERMANENT STORAGE ENGINE ---
-# Vercel Serverless क्लस्टर स्लीप मोड में जाने पर भी डेटा सुरक्षित रखने के लिए फ़ाइल बैकअप पाथ
-LOCAL_FILE_DB = "/tmp/shayan_keys_vault.json"
+# --- HYBRID IN-MEMORY VAULT ---
+# Vercel के स्लीप साइकिल से डेटा बचाने के लिए ग्लोबल रैम बफ़र
+GLOBAL_KEYS_VAULT = {}
+GLOBAL_HISTORY_LOGS = []
 
-def load_local_vault():
-    if os.path.exists(LOCAL_FILE_DB):
-        try:
-            with open(LOCAL_FILE_DB, 'r') as f:
-                return json.load(f)
-        except: return {}
-    return {}
-
-def save_local_vault(data):
-    try:
-        with open(LOCAL_FILE_DB, 'w') as f:
-            json.dump(data, f)
-    except: pass
-
-KV_URL = os.environ.get("KV_URL", "")
-if KV_URL.startswith("redis://") or KV_URL.startswith("rediss://"):
-    db = Redis.from_url(KV_URL, decode_responses=True)
-    is_redis = True
-else:
-    is_redis = False
-    class MockRedisEngine:
-        def __init__(self):
-            self.data = load_local_vault()
-        def get(self, k): return self.data.get(k)
-        def set(self, k, v): 
-            self.data[k] = str(v)
-            save_local_vault(self.data)
-            return True
-        def hgetall(self, k): return self.data.get(k, {})
-        def hset(self, k, mapping=None):
-            if k not in self.data: self.data[k] = {}
-            if mapping: self.data[k].update(mapping)
-            save_local_vault(self.data)
-            return len(mapping)
-        def del_key(self, k):
-            if k in self.data: 
-                del self.data[k]
-                save_local_vault(self.data)
-                return 1
-            return 0
-        def keys(self, p): 
-            prefix = p.replace('*', '')
-            return [k for k in self.data.keys() if k.startswith(prefix)]
-        def lpush(self, k, v):
-            if k not in self.data: self.data[k] = []
-            self.data[k].insert(0, v)
-            save_local_vault(self.data)
-        def lrange(self, k, s, e): return self.data.get(k, [])[:50]
-    db = MockRedisEngine()
-
-# Master Source Core Links Configuration
 MASTER_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
 TOOLS_CONFIG = {
     "number": f"https://ft-osint-api.duckdns.org/api/number?key={MASTER_KEY}",
@@ -88,13 +37,22 @@ def clean_branding_data(data):
 
 @app.route('/api/admin/keys', methods=['GET', 'POST'])
 def manage_keys():
+    global GLOBAL_KEYS_VAULT
     if request.method == 'POST':
         data = request.json or {}
+        # अगर यह फ्रंटएंड से आया हुआ ऑटो-सिंक डेटा है
+        if data.get('sync_list') is not None:
+            for k_obj in data.get('sync_list', []):
+                k_str = k_obj.get('key')
+                if k_str and k_str not in GLOBAL_KEYS_VAULT:
+                    GLOBAL_KEYS_VAULT[k_str] = k_obj
+            return jsonify({"success": True, "message": "Vault Synced"})
+
         custom_key = data.get('key')
-        if not custom_key: return jsonify({"error": "Key parameter required"}), 400
+        if not custom_key: return jsonify({"error": "Key parameters required"}), 400
         
-        db.hset(f"apikey:{custom_key}", mapping={
-            "name": data.get('name', 'Client Reference'),
+        GLOBAL_KEYS_VAULT[custom_key] = {
+            "name": data.get('name', 'Client'),
             "key": custom_key,
             "price": float(data.get('price', 0) or 0),
             "daily_limit": int(data.get('daily_limit', 1000)),
@@ -105,54 +63,52 @@ def manage_keys():
             "allow_aadhar": "true" if str(data.get('allow_aadhar')).lower() == "true" else "false",
             "allow_family": "true" if str(data.get('allow_family')).lower() == "true" else "false",
             "allow_insta": "true" if str(data.get('allow_insta')).lower() == "true" else "false"
-        })
+        }
         return jsonify({"success": True})
         
-    all_keys = []
-    for k in db.keys("apikey:*"):
-        val = db.hgetall(k)
-        if val: all_keys.append(val)
-    return jsonify({"keys": all_keys})
+    return jsonify({"keys": list(GLOBAL_KEYS_VAULT.values())})
 
 @app.route('/api/admin/keys/delete', methods=['POST'])
 def delete_key():
+    global GLOBAL_KEYS_VAULT
     data = request.json or {}
     target_key = data.get('key')
-    if is_redis:
-        db.delete(f"apikey:{target_key}")
-    else:
-        db.del_key(f"apikey:{target_key}")
-    return jsonify({"success": True, "message": "Cluster Purged Successfully"})
+    if target_key in GLOBAL_KEYS_VAULT:
+        del GLOBAL_KEYS_VAULT[target_key]
+    return jsonify({"success": True})
 
 @app.route('/api/admin/toggle', methods=['POST'])
 def toggle_key():
+    global GLOBAL_KEYS_VAULT
     data = request.json or {}
     key_name = data.get('key')
-    current_status = data.get('status', 'on')
-    new_status = 'off' if current_status == 'on' else 'on'
-    db.hset(f"apikey:{key_name}", mapping={"status": new_status})
-    return jsonify({"success": True, "new_status": new_status})
+    if key_name in GLOBAL_KEYS_VAULT:
+        current = GLOBAL_KEYS_VAULT[key_name].get('status', 'on')
+        GLOBAL_KEYS_VAULT[key_name]['status'] = 'off' if current == 'on' else 'on'
+    return jsonify({"success": True})
 
 @app.route('/api/admin/history', methods=['GET'])
 def get_global_history():
-    logs = db.lrange("api:history", 0, 49) or []
-    return jsonify({"history": [json.loads(x) for x in logs]})
+    return jsonify({"history": GLOBAL_HISTORY_LOGS[:50]})
 
 def execute_proxy(tool_name, query_param, tracking_label):
+    global GLOBAL_KEYS_VAULT, GLOBAL_HISTORY_LOGS
     client_key = request.args.get('key')
     lookup_input = request.args.get(query_param)
-    if not lookup_input: return jsonify({"error": f"Missing parameter '{query_param}'"}), 400
     
-    key_meta = db.hgetall(f"apikey:{client_key}")
-    if not key_meta: return jsonify({"error": "Unauthorized API Key"}), 403
+    if not lookup_input: return jsonify({"error": f"Missing parameter '{query_param}'"}), 400
+    if not client_key or client_key not in GLOBAL_KEYS_VAULT: 
+        return jsonify({"error": "Unauthorized API Key"}), 403
+        
+    key_meta = GLOBAL_KEYS_VAULT[client_key]
     if key_meta.get("status", "on") != "on": return jsonify({"error": "Key Suspended"}), 403
     
-    # टाइमर चेकिंग सीधे सर्वर साइड पर बैकग्राउंड ऑपरेशन्स के लिए
+    # --- SERVER SIDE AUTO EXPIRY ---
+    # चाहे वेबसाइट बंद हो, बैकएंड यहाँ खुद टाइम चेक करके की (Key) एक्सपायर कर देगा
     current_date = time.strftime("%Y-%m-%d")
     if current_date > key_meta.get("expire_date", "2026-12-31"):
-        if is_redis: db.delete(f"apikey:{client_key}")
-        else: db.del_key(f"apikey:{client_key}")
-        return jsonify({"error": "Key Expired automatically in background"}), 403
+        del GLOBAL_KEYS_VAULT[client_key]
+        return jsonify({"error": "Key Expired Automatically"}), 403
         
     if key_meta.get(f"allow_{tool_name}", "false") != "true": return jsonify({"error": "Access Denied"}), 403
     
@@ -164,14 +120,14 @@ def execute_proxy(tool_name, query_param, tracking_label):
         return jsonify({"error": "Upstream timeout", "details": str(e)}), 502
         
     log_query = "[Masked]" if "aadhar" in tool_name else lookup_input
-    db.lpush("api:history", json.dumps({
+    GLOBAL_HISTORY_LOGS.insert(0, {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "key_used": client_key,
         "client_name": key_meta.get("name"),
         "type": tracking_label,
         "query": log_query,
         "status_code": response.status_code
-    }))
+    })
     return jsonify(upstream_data)
 
 @app.route('/api/number', methods=['GET'])
@@ -191,6 +147,3 @@ def lookup_ins(): return execute_proxy("insta", "username", "INSTAGRAM TRACE")
 
 def handler(request):
     return app(request)
-
-if __name__ == '__main__':
-    app.run(debug=True)
