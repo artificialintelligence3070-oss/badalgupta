@@ -1,14 +1,10 @@
 import os
 import requests
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template_string
 from datetime import datetime
 from dateutil import parser
 
-# Dynamic absolute path resolution for Vercel Serverless environments
-base_dir = os.path.dirname(os.path.abspath(__file__))
-template_dir = os.path.join(base_dir, 'templates')
-
-app = Flask(__name__, template_folder=template_dir)
+app = Flask(__name__)
 
 TARGET_API_BASE = "https://ft-osint-api.duckdns.org/api"
 UPSTREAM_DEFAULT_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
@@ -35,29 +31,322 @@ SUPPORTED_TOOLS = [
     "tgidinfo", "numleak"
 ]
 
+# --- HTML DASHBOARD TEMPLATE STRING ---
+HTML_DASHBOARD = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SHAYAN_EXPLORER | Core Gateway Hub</title>
+    <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: radial-gradient(circle at top right, #110a24, #05030a); color: #f3f4f6; }
+        .glass { background: rgba(22, 16, 41, 0.7); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.07); }
+    </style>
+</head>
+<body class="min-h-screen antialiased font-sans pb-12">
+    <header class="border-b border-white/5 py-4 px-8 flex justify-between items-center bg-black/30 backdrop-blur-md sticky top-0 z-40">
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-purple-500/20">
+                <i data-feather="cpu" class="w-5 h-5 text-white"></i>
+            </div>
+            <span class="text-xl font-black tracking-wider text-white">SHAYAN_EXPLORER</span>
+        </div>
+        <button onclick="toggleModal(true)" class="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl border border-white/10 text-xs font-bold tracking-wide flex items-center space-x-2 transition">
+            <i data-feather="link-2" class="w-4 h-4"></i> <span>Showcase Active Endpoint Documentation</span>
+        </button>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-6 space-y-8 mt-4">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div class="lg:col-span-1 glass rounded-2xl p-6 flex flex-col space-y-4">
+                <h2 id="formTitle" class="text-md font-bold tracking-wide text-purple-400 uppercase flex items-center">
+                    <i data-feather="plus-circle" class="mr-2 w-4 h-4"></i> Provision Token Strategy
+                </h2>
+                <form id="keyForm" class="space-y-4">
+                    <div>
+                        <label class="block text-[11px] uppercase text-gray-400 font-bold mb-1">User Identifier Profile</label>
+                        <input type="text" id="clientName" placeholder="Enterprise Client Name" class="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-purple-500 transition" required>
+                    </div>
+                    <div>
+                        <label class="block text-[11px] uppercase text-gray-400 font-bold mb-1">Unique API Token Target Signature</label>
+                        <input type="text" id="apiKey" placeholder="SHAYAN-SECRET-KEY" class="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-sm font-mono focus:outline-none focus:border-purple-500 transition" required>
+                    </div>
+                    <div>
+                        <label class="block text-[11px] uppercase text-gray-400 font-bold mb-1">Daily Access Requests Limit Qty</label>
+                        <input type="number" id="keyLimit" value="500" class="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-purple-500 transition" required>
+                    </div>
+                    <div>
+                        <label class="block text-[11px] uppercase text-gray-400 font-bold mb-1">Expiration Lifespan Bound Context</label>
+                        <input type="datetime-local" id="keyExpire" value="2026-12-31T23:59" class="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-sm font-mono focus:outline-none focus:border-purple-500 transition" required>
+                    </div>
+                    <div>
+                        <label class="block text-[11px] uppercase text-gray-400 font-bold mb-2">Scope Strategy Authorization Restrictions</label>
+                        <div class="flex items-center space-x-2 mb-2 p-2 bg-white/5 rounded-lg border border-white/5">
+                            <input type="checkbox" id="allToolsCheck" checked onchange="toggleAllTools(this)">
+                            <label for="allToolsCheck" class="text-xs font-bold text-emerald-400">Grant Global Authorization (All Tools)</label>
+                        </div>
+                        <div id="toolsGrid" class="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-1 opacity-40 pointer-events-none transition"></div>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button type="button" id="cancelEditBtn" onclick="resetFormState()" class="hidden w-1/3 py-3 bg-white/5 hover:bg-white/10 text-gray-400 rounded-xl font-bold text-xs transition">Cancel</button>
+                        <button type="submit" id="submitBtn" class="flex-1 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-bold text-xs tracking-wider transition shadow-lg shadow-purple-600/10">PROVISION ACCESS</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="lg:col-span-2 glass rounded-2xl p-6 flex flex-col max-h-[640px]">
+                <h2 class="text-sm font-bold uppercase tracking-wider text-indigo-400 mb-4 flex items-center"><i data-feather="shield" class="w-4 h-4 mr-2"></i> Runtime System Database Matrix</h2>
+                <div class="overflow-x-auto flex-1 overflow-y-auto">
+                    <table class="w-full text-left text-xs border-collapse">
+                        <thead class="sticky top-0 bg-[#150f27] z-10 text-gray-400 font-bold uppercase tracking-wider border-b border-white/5">
+                            <tr>
+                                <th class="pb-3">Profile</th>
+                                <th class="pb-3">Key Signature Token</th>
+                                <th class="pb-3">Scope Boundary</th>
+                                <th class="pb-3">Usage Metrices</th>
+                                <th class="pb-3">Expiration Matrix</th>
+                                <th class="pb-3">Status</th>
+                                <th class="pb-3 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="keysTable" class="divide-y divide-white/5 font-mono"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="glass rounded-2xl p-6">
+            <h2 class="text-sm font-bold uppercase tracking-wider text-blue-400 mb-4 flex items-center"><i data-feather="activity" class="w-4 h-4 mr-2"></i> System Request Streaming Audit Buffer Logs</h2>
+            <div class="overflow-x-auto max-h-60 overflow-y-auto">
+                <table class="w-full text-left text-xs border-collapse">
+                    <thead class="sticky top-0 bg-[#130b23] border-b border-white/10 text-gray-400 font-bold uppercase">
+                        <tr>
+                            <th class="py-2">Timestamp</th>
+                            <th class="py-2">Client Label</th>
+                            <th class="py-2">Token Value</th>
+                            <th class="py-2">Route Target</th>
+                            <th class="py-2">Param Metadata Queries Search</th>
+                            <th class="py-2">Gateway Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logsTable" class="divide-y divide-white/5 font-mono text-gray-300"></tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <div id="endpointModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
+        <div class="glass max-w-2xl w-full rounded-2xl p-6 flex flex-col max-h-[85vh]">
+            <div class="flex justify-between items-center mb-4 border-b border-white/5 pb-2">
+                <h3 class="font-bold text-white tracking-wide text-sm uppercase flex items-center"><i data-feather="code" class="text-purple-400 mr-2 w-4 h-4"></i> Uniform Resource Interface Schema (Router Link Engine)</h3>
+                <button onclick="toggleModal(false)" class="text-gray-400 hover:text-white"><i data-feather="x"></i></button>
+            </div>
+            <p class="text-xs text-gray-400 mb-4">Click any structural code component endpoint below to copy it directly to your keyboard storage arrays buffer. Append your authorized secret key param variable token.</p>
+            <div id="modalList" class="space-y-2 overflow-y-auto flex-1 pr-1 font-mono text-xs"></div>
+        </div>
+    </div>
+
+    <script>
+        const toolsList = ["adv","paytm","imei","calltracer","upi","ifsc","number","pincode","ip","challan","ff","bgmi","snap","email","vehicle","git","insta","tg","tgidinfo","numleak"];
+        let localKeysCache = {};
+
+        function initToolsCheckboxes() {
+            const grid = document.getElementById('toolsGrid');
+            grid.innerHTML = '';
+            toolsList.forEach(t => {
+                grid.innerHTML += `
+                    <div class="flex items-center space-x-2 bg-black/20 p-1.5 rounded-lg border border-white/5 hover:border-white/10">
+                        <input type="checkbox" value="${t}" id="chk-${t}" class="tool-chk">
+                        <label for="chk-${t}" class="text-[11px] tracking-wide text-gray-300 font-medium capitalize">${t}</label>
+                    </div>`;
+            });
+        }
+
+        function toggleAllTools(src) {
+            const grid = document.getElementById('toolsGrid');
+            if(src.checked) {
+                grid.classList.add('opacity-40', 'pointer-events-none');
+            } else {
+                grid.classList.remove('opacity-40', 'pointer-events-none');
+            }
+        }
+
+        function toggleModal(open) {
+            const modal = document.getElementById('endpointModal');
+            modal.style.display = open ? 'flex' : 'none';
+            if(open) {
+                const host = window.location.origin;
+                const list = document.getElementById('modalList');
+                list.innerHTML = '';
+                toolsList.forEach(t => {
+                    const sampleUrl = `${host}/api/${t}?key=YOUR_KEY&${t==='email'?'email=test@gmail.com':t==='vehicle'?'vehicle=MH02':'num=9876543210'}`;
+                    list.innerHTML += `
+                        <div onclick="copyText('${sampleUrl}')" class="p-2.5 bg-black/40 hover:bg-purple-600/10 border border-white/5 hover:border-purple-500/30 rounded-xl cursor-pointer transition flex justify-between items-center group">
+                            <span class="text-purple-300 truncate mr-2">${sampleUrl}</span>
+                            <i data-feather="copy" class="w-3.5 h-3.5 text-gray-500 group-hover:text-purple-400 flex-shrink-0"></i>
+                        </div>`;
+                });
+                feather.replace();
+            }
+        }
+
+        function copyText(txt) {
+            navigator.clipboard.writeText(txt);
+            alert("Endpoint string copied successfully.");
+        }
+
+        async function fetchState() {
+            const res = await fetch('/api/admin/keys');
+            const data = await res.json();
+            const table = document.getElementById('keysTable');
+            table.innerHTML = '';
+            localKeysCache = {};
+
+            data.forEach(k => {
+                localKeysCache[k.key] = k;
+                const isAll = k.tools.includes('all');
+                const badge = isAll ? 'GLOBAL' : `${k.tools.length} Tools`;
+                const isSuspended = k.status === 'Suspended';
+                
+                table.innerHTML += `
+                    <tr class="hover:bg-white/5 transition ${isSuspended ? 'opacity-40' : ''}">
+                        <td class="py-4 font-sans font-bold text-white">${k.name}</td>
+                        <td class="py-4 text-purple-400 font-bold font-mono text-[11px]">${k.key}</td>
+                        <td class="py-4"><span class="px-2 py-0.5 rounded border text-[10px] font-bold ${isAll?'bg-emerald-500/10 text-emerald-400 border-emerald-500/20':'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}">${badge}</span></td>
+                        <td class="py-4 text-gray-300">${k.used} / <span class="text-gray-500">${k.limit}</span></td>
+                        <td class="py-4 text-gray-400 text-[11px]">${k.expire_date.replace('T', ' ')}</td>
+                        <td class="py-4"><span class="text-[10px] font-bold ${isSuspended?'text-rose-400':'text-emerald-400'}">${k.status.toUpperCase()}</span></td>
+                        <td class="py-4 text-right space-x-1">
+                            <button onclick="toggleSuspend('${k.key}', '${k.status}')" class="p-1.5 rounded hover:bg-white/5 text-amber-400"><i data-feather="${isSuspended?'play':'square'}" class="w-3.5 h-3.5"></i></button>
+                            <button onclick="triggerEdit('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-blue-400"><i data-feather="edit-3" class="w-3.5 h-3.5"></i></button>
+                            <button onclick="dropKey('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-rose-400"><i data-feather="trash-2" class="w-3.5 h-3.5"></i></button>
+                        </td>
+                    </tr>`;
+            });
+            feather.replace();
+        }
+
+        async function fetchLogs() {
+            const res = await fetch('/api/admin/logs');
+            const data = await res.json();
+            const table = document.getElementById('logsTable');
+            table.innerHTML = data.length === 0 ? `<tr><td colspan="6" class="py-4 text-center text-gray-500 font-sans">Streaming tracking buffer queue is currently empty.</td></tr>` : '';
+            
+            data.forEach(l => {
+                table.innerHTML += `
+                    <tr class="hover:bg-white/5 transition">
+                        <td class="py-2 text-gray-500 text-[11px]">${l.timestamp}</td>
+                        <td class="py-2 font-sans text-white">${l.key_name}</td>
+                        <td class="py-2 text-purple-400">${l.key}</td>
+                        <td class="py-2"><span class="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 rounded border border-blue-500/20 text-[10px] font-bold">${l.tool}</span></td>
+                        <td class="py-2 text-amber-300 max-w-[180px] truncate">${l.search}</td>
+                        <td class="py-2"><span class="text-emerald-400 font-bold">${l.status}</span></td>
+                    </tr>`;
+            });
+        }
+
+        document.getElementById('keyForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const isGlobal = document.getElementById('allToolsCheck').checked;
+            let selectedTools = ['all'];
+            
+            if(!isGlobal) {
+                selectedTools = Array.from(document.querySelectorAll('.tool-chk:checked')).map(c => c.value);
+                if(selectedTools.length === 0) { return alert("Please select at least one tool."); }
+            }
+
+            await fetch('/api/admin/keys', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: document.getElementById('clientName').value,
+                    key: document.getElementById('apiKey').value,
+                    limit: document.getElementById('keyLimit').value,
+                    expire_date: document.getElementById('keyExpire').value,
+                    tools: selectedTools
+                })
+            });
+
+            resetFormState();
+            fetchState();
+        });
+
+        function triggerEdit(keyId) {
+            const k = localKeysCache[keyId];
+            if(!k) return;
+            document.getElementById('formTitle').innerHTML = `<i data-feather="edit" class="mr-2 w-4 h-4 text-blue-400"></i> Modify Active Token Profile`;
+            document.getElementById('clientName').value = k.name;
+            document.getElementById('apiKey').value = k.key;
+            document.getElementById('apiKey').readOnly = true;
+            document.getElementById('keyLimit').value = k.limit;
+            document.getElementById('keyExpire').value = k.expire_date;
+            
+            const isAll = k.tools.includes('all');
+            document.getElementById('allToolsCheck').checked = isAll;
+            toggleAllTools({checked: isAll});
+            document.querySelectorAll('.tool-chk').forEach(chk => { chk.checked = !isAll && k.tools.includes(chk.value); });
+            document.getElementById('cancelEditBtn').classList.remove('hidden');
+            document.getElementById('submitBtn').innerText = "SAVE MODIFICATIONS";
+            feather.replace();
+        }
+
+        function resetFormState() {
+            document.getElementById('formTitle').innerHTML = `<i data-feather="plus-circle" class="mr-2 w-4 h-4"></i> Provision Token Strategy`;
+            document.getElementById('keyForm').reset();
+            document.getElementById('apiKey').readOnly = false;
+            document.getElementById('keyExpire').value = "2026-12-31T23:59";
+            toggleAllTools({checked: true});
+            document.getElementById('cancelEditBtn').classList.add('hidden');
+            document.getElementById('submitBtn').innerText = "PROVISION ACCESS";
+            feather.replace();
+        }
+
+        async function toggleSuspend(keyId, currentStatus) {
+            await fetch('/api/admin/keys/status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: keyId, status: currentStatus === 'Active' ? 'Suspended' : 'Active' })
+            });
+            fetchState();
+        }
+
+        async function dropKey(keyId) {
+            if(confirm("Permanently wipe this routing token?")) {
+                await fetch(`/api/admin/keys/delete/${keyId}`, { method: 'DELETE' });
+                fetchState();
+            }
+        }
+
+        initToolsCheckboxes();
+        fetchState();
+        fetchLogs();
+        setInterval(fetchLogs, 3000);
+        setTimeout(() => { feather.replace(); }, 400);
+    </script>
+</body>
+</html>
+"""
+
 def check_key_validity(api_key, tool_name):
     if api_key not in DB["keys"]:
         return False, "Invalid API Key signature."
-    
     key_data = DB["keys"][api_key]
-    
     if key_data.get("status", "Active") == "Suspended":
         return False, "This API access footprint has been explicitly suspended."
-    
     try:
         expire_dt = parser.parse(key_data["expire_date"])
         if datetime.now() > expire_dt:
             return False, f"API Key expired automatically on {key_data['expire_date']}."
     except Exception:
-        return False, "System runtime token configuration parse structural exception."
-    
+        return False, "System runtime token configuration parse exception."
     if int(key_data["used"]) >= int(key_data["limit"]):
-        return False, f"Allocated request parameters quota threshold limit reached ({key_data['limit']})."
-    
+        return False, f"Allocated quota threshold limit reached ({key_data['limit']})."
     allowed_tools = key_data.get("tools", [])
     if "all" not in allowed_tools and tool_name not in allowed_tools:
-        return False, f"Access denied. Key restricted from using router parameter: '{tool_name}'."
-    
+        return False, f"Access denied for router parameter: '{tool_name}'."
     return True, key_data
 
 def sanitize_payload(data):
@@ -74,7 +363,7 @@ def sanitize_payload(data):
 
 @app.route('/')
 def dashboard():
-    return render_template('index.html')
+    return render_template_string(HTML_DASHBOARD)
 
 @app.route('/api/admin/keys', methods=['GET', 'POST'])
 def handle_keys():
@@ -82,8 +371,7 @@ def handle_keys():
         data = request.json or {}
         key_id = data.get('key')
         if not key_id:
-            return jsonify({"status": "error", "message": "Key code input signature is mandatory"}), 400
-        
+            return jsonify({"status": "error", "message": "Key code is mandatory"}), 400
         DB["keys"][key_id] = {
             "name": data.get('name', 'Client Target Profile'),
             "key": key_id,
@@ -121,17 +409,14 @@ def fetch_logs():
 def proxy_gateway(tool):
     if tool not in SUPPORTED_TOOLS:
         return jsonify({"status": "error", "developer": "SHAYAN_EXPLORER", "message": "Invalid Route."}), 404
-
     user_key = request.args.get('key')
     if not user_key:
         return jsonify({"status": "error", "developer": "SHAYAN_EXPLORER", "message": "Missing key parameters."}), 401
-
     is_valid, result = check_key_validity(user_key, tool)
     if not is_valid:
         return jsonify({"status": "error", "developer": "SHAYAN_EXPLORER", "message": result}), 403
 
     key_data = result
-
     search_query = "Dynamic Data Request"
     for param in ['num', 'email', 'vehicle', 'username', 'uid', 'id', 'upi', 'ifsc', 'imei', 'ip', 'pin', 'info']:
         if request.args.get(param):
