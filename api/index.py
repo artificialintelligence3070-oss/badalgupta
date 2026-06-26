@@ -356,6 +356,9 @@ def sanitize_payload(data):
     elif isinstance(data, list):
         return [sanitize_payload(i) for i in data]
     elif isinstance(data, str):
+        # Swap out specific telegram channels or branding lines for your custom branding
+        if "https://t.me/lynx_api" in data:
+            data = data.replace("https://t.me/lynx_api", "https://t.me/shayan_explorer_channel")
         for b in banned:
             data = data.replace(b, "SHAYAN_EXPLORER")
         return data
