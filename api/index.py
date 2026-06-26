@@ -4,12 +4,15 @@ from flask import Flask, request, jsonify, render_template
 from datetime import datetime
 from dateutil import parser
 
-app = Flask(__name__, template_folder='../templates')
+# Dynamic absolute path resolution for Vercel Serverless environments
+base_dir = os.path.dirname(os.path.abspath(__file__))
+template_dir = os.path.join(base_dir, 'templates')
+
+app = Flask(__name__, template_folder=template_dir)
 
 TARGET_API_BASE = "https://ft-osint-api.duckdns.org/api"
 UPSTREAM_DEFAULT_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
 
-# Master Database Simulation Matrix
 DB = {
     "keys": {
         "SHAYAN-MASTER": {
@@ -38,11 +41,9 @@ def check_key_validity(api_key, tool_name):
     
     key_data = DB["keys"][api_key]
     
-    # 1. State Status Suspension Checks
     if key_data.get("status", "Active") == "Suspended":
         return False, "This API access footprint has been explicitly suspended."
     
-    # 2. Expiration Validation Engine
     try:
         expire_dt = parser.parse(key_data["expire_date"])
         if datetime.now() > expire_dt:
@@ -50,11 +51,9 @@ def check_key_validity(api_key, tool_name):
     except Exception:
         return False, "System runtime token configuration parse structural exception."
     
-    # 3. Usage Cap Enforcement
     if int(key_data["used"]) >= int(key_data["limit"]):
         return False, f"Allocated request parameters quota threshold limit reached ({key_data['limit']})."
     
-    # 4. Strict Granular Tool Matching Checks
     allowed_tools = key_data.get("tools", [])
     if "all" not in allowed_tools and tool_name not in allowed_tools:
         return False, f"Access denied. Key restricted from using router parameter: '{tool_name}'."
@@ -73,8 +72,6 @@ def sanitize_payload(data):
         return data
     return data
 
-# --- ADMIN REST MANAGEMENT COMPONENT ROUTING ---
-
 @app.route('/')
 def dashboard():
     return render_template('index.html')
@@ -87,13 +84,12 @@ def handle_keys():
         if not key_id:
             return jsonify({"status": "error", "message": "Key code input signature is mandatory"}), 400
         
-        # Creates or securely merges updates seamlessly (Edit / Re-add)
         DB["keys"][key_id] = {
             "name": data.get('name', 'Client Target Profile'),
             "key": key_id,
             "expire_date": data.get('expire_date', '2026-12-31T23:59'),
             "limit": int(data.get('limit', 100)),
-            "used": DB["keys"].get(key_id, {}).get("used", 0), # Preserve data metrics on edit
+            "used": DB["keys"].get(key_id, {}).get("used", 0),
             "status": data.get('status', DB["keys"].get(key_id, {}).get("status", "Active")),
             "tools": data.get('tools', ['all'])
         }
@@ -121,8 +117,6 @@ def drop_key(key_id):
 def fetch_logs():
     return jsonify(DB["logs"])
 
-# --- THE ALL-IN-ONE PROXY GATEWAY ENGINE ---
-
 @app.route('/api/<tool>', methods=['GET'])
 def proxy_gateway(tool):
     if tool not in SUPPORTED_TOOLS:
@@ -138,7 +132,6 @@ def proxy_gateway(tool):
 
     key_data = result
 
-    # Identify transaction payload details
     search_query = "Dynamic Data Request"
     for param in ['num', 'email', 'vehicle', 'username', 'uid', 'id', 'upi', 'ifsc', 'imei', 'ip', 'pin', 'info']:
         if request.args.get(param):
