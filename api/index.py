@@ -1,198 +1,177 @@
 import os
-import time
-import json
 import requests
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+from flask import Flask, request, jsonify, render_template
+from datetime import datetime
+from dateutil import parser
 
-app = Flask(__name__)
-CORS(app)
+app = Flask(__name__, template_folder='../templates')
 
-DB_PATH = "/tmp/vault.db"
-GLOBAL_KEYS_VAULT = {}
-GLOBAL_HISTORY_LOGS = []
-SYSTEM_GLOBAL_MUTEX = True
+TARGET_API_BASE = "https://ft-osint-api.duckdns.org/api"
+UPSTREAM_DEFAULT_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
 
-MASTER_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
-TOOLS_CONFIG = {
-    "number": "https://ft-osint-api.duckdns.org/api/number",
-    "vehicle": "https://ft-osint-api.duckdns.org/api/vehicle",
-    "aadhar": "https://ft-osint-api.duckdns.org/api/aadhar",
-    "family": "https://ft-osint-api.duckdns.org/api/adharfamily",
-    "insta": "https://ft-osint-api.duckdns.org/api/insta"
+# Master Database Simulation Matrix
+DB = {
+    "keys": {
+        "SHAYAN-MASTER": {
+            "name": "Master Enterprise Dev",
+            "key": "SHAYAN-MASTER",
+            "expire_date": "2026-12-31T23:59",
+            "limit": 1000,
+            "used": 0,
+            "status": "Active",
+            "tools": ["all"]
+        }
+    },
+    "logs": []
 }
 
-def load_local_disk_db():
-    global GLOBAL_KEYS_VAULT
-    if os.path.exists(DB_PATH):
-        try:
-            with open(DB_PATH, "r") as f:
-                GLOBAL_KEYS_VAULT = json.load(f)
-        except Exception:
-            pass
+SUPPORTED_TOOLS = [
+    "adv", "paytm", "imei", "calltracer", "upi", "ifsc", 
+    "number", "pincode", "ip", "challan", "ff", "bgmi", 
+    "snap", "email", "vehicle", "git", "insta", "tg", 
+    "tgidinfo", "numleak"
+]
 
-def save_local_disk_db():
+def check_key_validity(api_key, tool_name):
+    if api_key not in DB["keys"]:
+        return False, "Invalid API Key signature."
+    
+    key_data = DB["keys"][api_key]
+    
+    # 1. State Status Suspension Checks
+    if key_data.get("status", "Active") == "Suspended":
+        return False, "This API access footprint has been explicitly suspended."
+    
+    # 2. Expiration Validation Engine
     try:
-        with open(DB_PATH, "w") as f:
-            json.dump(GLOBAL_KEYS_VAULT, f)
+        expire_dt = parser.parse(key_data["expire_date"])
+        if datetime.now() > expire_dt:
+            return False, f"API Key expired automatically on {key_data['expire_date']}."
     except Exception:
-        pass
+        return False, "System runtime token configuration parse structural exception."
+    
+    # 3. Usage Cap Enforcement
+    if int(key_data["used"]) >= int(key_data["limit"]):
+        return False, f"Allocated request parameters quota threshold limit reached ({key_data['limit']})."
+    
+    # 4. Strict Granular Tool Matching Checks
+    allowed_tools = key_data.get("tools", [])
+    if "all" not in allowed_tools and tool_name not in allowed_tools:
+        return False, f"Access denied. Key restricted from using router parameter: '{tool_name}'."
+    
+    return True, key_data
 
-load_local_disk_db()
+def sanitize_payload(data):
+    banned = ["@ftgamer2", "@bornex", "Ultra", "ft-osint", "duckdns"]
+    if isinstance(data, dict):
+        return {k: sanitize_payload(v) for k, v in data.items() if not any(b in str(k) for b in banned)}
+    elif isinstance(data, list):
+        return [sanitize_payload(i) for i in data]
+    elif isinstance(data, str):
+        for b in banned:
+            data = data.replace(b, "SHAYAN_EXPLORER")
+        return data
+    return data
 
-def clean_branding_data(data):
-    data_str = json.dumps(data)
-    data_str = data_str.replace("@ftgamer2", "shayan_explorer").replace("@FTgamer2", "shayan_explorer")
-    data_str = data_str.replace("FTgamer2", "shayan_explorer").replace("ftgamer2", "shayan_explorer")
-    data_str = data_str.replace("https://t.me/lynx_api", "https://t.me/shayan_explorer_channel")
-    data_str = data_str.replace("https://t.me/FTgamer2", "https://t.me/shayan_explorer_channel")
-    cleaned = json.loads(data_str)
-    if isinstance(cleaned, dict):
-        cleaned["by"] = "shayan_explorer"
-        cleaned["channel"] = "https://t.me/shayan_explorer_channel"
-    return cleaned
+# --- ADMIN REST MANAGEMENT COMPONENT ROUTING ---
 
-@app.route('/api/admin/health', methods=['GET', 'POST'])
-def toggle_system_mutex():
-    global SYSTEM_GLOBAL_MUTEX
-    if request.method == 'POST':
-        data = request.json or {}
-        if "switch" in data:
-            SYSTEM_GLOBAL_MUTEX = bool(data.get("switch"))
-    return jsonify({"status": "operational", "kill_switch_active": not SYSTEM_GLOBAL_MUTEX})
+@app.route('/')
+def dashboard():
+    return render_template('index.html')
 
 @app.route('/api/admin/keys', methods=['GET', 'POST'])
-def manage_keys():
-    global GLOBAL_KEYS_VAULT
-    load_local_disk_db()
+def handle_keys():
     if request.method == 'POST':
         data = request.json or {}
-        if "sync_list" in data:
-            for item in data.get("sync_list", []):
-                k_str = item.get("key")
-                if k_str:
-                    GLOBAL_KEYS_VAULT[k_str] = item
-            save_local_disk_db()
-            return jsonify({"success": True, "state": "synced"})
-
-        custom_key = data.get('key')
-        if not custom_key: return jsonify({"error": "Missing identifier"}), 400
+        key_id = data.get('key')
+        if not key_id:
+            return jsonify({"status": "error", "message": "Key code input signature is mandatory"}), 400
         
-        GLOBAL_KEYS_VAULT[custom_key] = {
-            "name": data.get('name', 'Subscriber Asset'),
-            "key": custom_key,
-            "price": float(data.get('price', 0) or 0),
-            "daily_limit": int(data.get('daily_limit', 2500)),
-            "expire_date": data.get('expire_date', 'lifetime'),
-            "status": data.get('status', 'on'),
-            "deleted_by_admin": False,
-            "allow_number": "true" if str(data.get('allow_number')).lower() == "true" else "false",
-            "allow_vehicle": "true" if str(data.get('allow_vehicle')).lower() == "true" else "false",
-            "allow_aadhar": "true" if str(data.get('allow_aadhar')).lower() == "true" else "false",
-            "allow_family": "true" if str(data.get('allow_family')).lower() == "true" else "false",
-            "allow_insta": "true" if str(data.get('allow_insta')).lower() == "true" else "false"
+        # Creates or securely merges updates seamlessly (Edit / Re-add)
+        DB["keys"][key_id] = {
+            "name": data.get('name', 'Client Target Profile'),
+            "key": key_id,
+            "expire_date": data.get('expire_date', '2026-12-31T23:59'),
+            "limit": int(data.get('limit', 100)),
+            "used": DB["keys"].get(key_id, {}).get("used", 0), # Preserve data metrics on edit
+            "status": data.get('status', DB["keys"].get(key_id, {}).get("status", "Active")),
+            "tools": data.get('tools', ['all'])
         }
-        save_local_disk_db()
-        return jsonify({"success": True})
-    return jsonify({"keys": list(GLOBAL_KEYS_VAULT.values())})
+        return jsonify({"status": "success"})
+    return jsonify(list(DB["keys"].values()))
 
-@app.route('/api/admin/keys/delete', methods=['POST'])
-def delete_key():
-    global GLOBAL_KEYS_VAULT, GLOBAL_HISTORY_LOGS
-    load_local_disk_db()
+@app.route('/api/admin/keys/status', methods=['POST'])
+def change_status():
     data = request.json or {}
-    target_key = data.get('key')
-    if target_key in GLOBAL_KEYS_VAULT:
-        GLOBAL_KEYS_VAULT[target_key]['deleted_by_admin'] = True
-        GLOBAL_KEYS_VAULT[target_key]['status'] = 'deleted'
-        save_local_disk_db()
-    return jsonify({"success": True})
+    key_id = data.get('key')
+    new_status = data.get('status')
+    if key_id in DB["keys"]:
+        DB["keys"][key_id]["status"] = new_status
+        return jsonify({"status": "success"})
+    return jsonify({"status": "error", "message": "Token not found"}), 404
 
-@app.route('/api/admin/toggle', methods=['POST'])
-def toggle_key():
-    global GLOBAL_KEYS_VAULT
-    load_local_disk_db()
-    data = request.json or {}
-    key_name = data.get('key')
-    if key_name in GLOBAL_KEYS_VAULT:
-        current = GLOBAL_KEYS_VAULT[key_name].get('status', 'on')
-        GLOBAL_KEYS_VAULT[key_name]['status'] = 'off' if current == 'on' else 'on'
-        save_local_disk_db()
-    return jsonify({"success": True})
+@app.route('/api/admin/keys/delete/<key_id>', methods=['DELETE'])
+def drop_key(key_id):
+    if key_id in DB["keys"]:
+        del DB["keys"][key_id]
+        return jsonify({"status": "success"})
+    return jsonify({"status": "error"}), 404
 
-@app.route('/api/admin/history', methods=['GET', 'POST', 'DELETE'])
-def handle_history():
-    global GLOBAL_HISTORY_LOGS
-    if request.method == 'DELETE':
-        GLOBAL_HISTORY_LOGS.clear()
-        return jsonify({"success": True, "message": "History cleared"})
-    return jsonify({"history": GLOBAL_HISTORY_LOGS[:100]})
+@app.route('/api/admin/logs', methods=['GET'])
+def fetch_logs():
+    return jsonify(DB["logs"])
 
-def execute_proxy(tool_name, query_param, tracking_label):
-    global GLOBAL_KEYS_VAULT, GLOBAL_HISTORY_LOGS, SYSTEM_GLOBAL_MUTEX
-    load_local_disk_db()
-    
-    if not SYSTEM_GLOBAL_MUTEX:
-        return jsonify({"error": "System Maintenance", "message": "All API pipelines paused by Administrator."}), 503
-        
-    client_key = request.args.get('key')
-    lookup_input = request.args.get('num') if tool_name != 'insta' else request.args.get('username')
-    if tool_name == 'vehicle' and request.args.get('vehicle'):
-        lookup_input = request.args.get('vehicle')
+# --- THE ALL-IN-ONE PROXY GATEWAY ENGINE ---
 
-    if not lookup_input: 
-        return jsonify({"error": f"Missing query parameter configuration"}), 400
-        
-    if not client_key or client_key not in GLOBAL_KEYS_VAULT: 
-        return jsonify({"error": "API key validation failed"}), 403
-        
-    key_meta = GLOBAL_KEYS_VAULT[client_key]
-    
-    if key_meta.get("deleted_by_admin") is True or key_meta.get("status") == "deleted":
-        return jsonify({"error": "API is deleted by admin"}), 403
-        
-    if key_meta.get("status") == "off":
-        return jsonify({"error": "admin of the key"}), 403
-        
-    exp_date = key_meta.get("expire_date", "lifetime")
-    if exp_date != "lifetime":
-        current_date = time.strftime("%Y-%m-%d")
-        if current_date > exp_date:
-            return jsonify({"error": "this key is expired"}), 403
-            
-    if key_meta.get(f"allow_{tool_name}", "false") != "true": 
-        return jsonify({"error": "Access Scope Denied for this route"}), 403
-    
+@app.route('/api/<tool>', methods=['GET'])
+def proxy_gateway(tool):
+    if tool not in SUPPORTED_TOOLS:
+        return jsonify({"status": "error", "developer": "SHAYAN_EXPLORER", "message": "Invalid Route."}), 404
+
+    user_key = request.args.get('key')
+    if not user_key:
+        return jsonify({"status": "error", "developer": "SHAYAN_EXPLORER", "message": "Missing key parameters."}), 401
+
+    is_valid, result = check_key_validity(user_key, tool)
+    if not is_valid:
+        return jsonify({"status": "error", "developer": "SHAYAN_EXPLORER", "message": result}), 403
+
+    key_data = result
+
+    # Identify transaction payload details
+    search_query = "Dynamic Data Request"
+    for param in ['num', 'email', 'vehicle', 'username', 'uid', 'id', 'upi', 'ifsc', 'imei', 'ip', 'pin', 'info']:
+        if request.args.get(param):
+            search_query = f"{param}: {request.args.get(param)}"
+            break
+
+    upstream_params = dict(request.args)
+    upstream_params['key'] = UPSTREAM_DEFAULT_KEY
+
     try:
-        target_url = f"{TOOLS_CONFIG[tool_name]}?key={MASTER_KEY}&{query_param}={lookup_input}"
-        response = requests.get(target_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=12)
-        upstream_data = clean_branding_data(response.json() if response.status_code == 200 else {"raw": response.text})
+        response = requests.get(f"{TARGET_API_BASE}/{tool}", params=upstream_params, timeout=12)
+        try:
+            response_data = sanitize_payload(response.json())
+        except ValueError:
+            response_data = {"data": sanitize_payload(response.text)}
     except Exception as e:
-        return jsonify({"error": "Upstream timeout", "details": str(e)}), 502
-        
-    GLOBAL_HISTORY_LOGS.insert(0, {
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "key_used": client_key,
-        "client_name": key_meta.get("name"),
-        "type": tracking_label,
-        "query": lookup_input,
-        "status_code": response.status_code
+        response_data = {"status": "error", "message": f"Link failure: {str(e)}"}
+
+    key_data["used"] += 1
+    DB["logs"].insert(0, {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "key_name": key_data["name"],
+        "key": user_key,
+        "tool": tool.upper(),
+        "search": search_query,
+        "status": "Success" if response.status_code == 200 else "Failed"
     })
-    return jsonify(upstream_data)
 
-@app.route('/api/number', methods=['GET'])
-def lookup_num(): return execute_proxy("number", "num", "NUMBER")
+    if isinstance(response_data, dict):
+        response_data["developer"] = "SHAYAN_EXPLORER"
+        response_data["status"] = "SUCCESS"
 
-@app.route('/api/vehicle', methods=['GET'])
-def lookup_veh(): return execute_proxy("vehicle", "vehicle", "VEHICLE")
+    return jsonify(response_data), response.status_code
 
-@app.route('/api/aadhar', methods=['GET'])
-def lookup_adr(): return execute_proxy("aadhar", "num", "AADHAR")
-
-@app.route('/api/adharfamily', methods=['GET'])
-def lookup_fam(): return execute_proxy("family", "num", "FAMILY")
-
-@app.route('/api/insta', methods=['GET'])
-def lookup_ins(): return execute_proxy("insta", "username", "INSTAGRAM")
-
-def handler(request): return app(request)
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
