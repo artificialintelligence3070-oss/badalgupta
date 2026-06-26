@@ -2,537 +2,312 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Vernex Enterprise Control Hub v6</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SHAYAN_EXPLORER | Core Gateway Hub</title>
+    <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
     <style>
-        body { 
-            background-color: #020205; 
-            font-family: 'Plus Jakarta Sans', sans-serif; 
-            padding-bottom: 75px; 
-            overflow-x: hidden;
-        }
-        @media (min-width: 768px) { body { padding-bottom: 0; } }
-        .mono-font { font-family: 'JetBrains Mono', monospace; }
-        
-        /* Premium Cyber Neon Glow Accents */
-        .neon-glow-cyan {
-            box-shadow: 0 0 15px rgba(6, 182, 212, 0.15), inset 0 0 10px rgba(6, 182, 212, 0.05);
-            border: 1px solid rgba(6, 182, 212, 0.2) !important;
-        }
-        .neon-glow-emerald {
-            box-shadow: 0 0 15px rgba(16, 185, 129, 0.15), inset 0 0 10px rgba(16, 185, 129, 0.05);
-            border: 1px solid rgba(16, 185, 129, 0.2) !important;
-        }
-        .neon-glow-purple {
-            box-shadow: 0 0 15px rgba(139, 92, 246, 0.15), inset 0 0 10px rgba(139, 92, 246, 0.05);
-            border: 1px solid rgba(139, 92, 246, 0.2) !important;
-        }
-        .neon-text-glow {
-            text-shadow: 0 0 8px rgba(34, 211, 238, 0.6);
-        }
-        
-        .nav-active { 
-            background: rgba(6, 182, 212, 0.06); 
-            border-left: 4px solid #06b6d4; 
-            color: #22d3ee;
-            box-shadow: 10px 0 15px -10px rgba(6, 182, 212, 0.3) inset;
-        }
-        @media (max-width: 767px) { 
-            .nav-active { 
-                border-left: 0; 
-                border-top: 3px solid #06b6d4; 
-                background: none; 
-                box-shadow: 0 10px 15px -10px rgba(6, 182, 212, 0.3) inset;
-            } 
-        }
-        .glass-panel { 
-            background: rgba(7, 7, 15, 0.75); 
-            border: 1px solid rgba(255, 255, 255, 0.03); 
-            backdrop-filter: blur(25px); 
-        }
-        .terminal-box { 
-            background: #010103; 
-            border: 1px solid rgba(6, 182, 212, 0.15); 
-            box-shadow: inset 0 0 15px rgba(6, 182, 212, 0.05);
-        }
-        
-        /* Custom Input Glow focuses */
-        .input-cyber:focus {
-            outline: none;
-            border-color: #06b6d4 !important;
-            box-shadow: 0 0 12px rgba(6, 182, 212, 0.3);
-            background-color: #04040a;
-        }
+        body { background: radial-gradient(circle at top right, #110a24, #05030a); color: #f3f4f6; }
+        .glass { background: rgba(22, 16, 41, 0.7); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.07); }
     </style>
 </head>
-<body class="text-slate-300 antialiased min-h-screen flex flex-col md:flex-row">
+<body class="min-h-screen antialiased font-sans pb-12">
 
-    <aside class="hidden md:flex w-68 bg-[#040409] border-r border-slate-900 flex-col shrink-0 text-xs font-mono">
-        <div class="p-6 border-b border-slate-900 bg-[#020206]">
-            <h1 class="text-sm font-black tracking-widest text-slate-100 uppercase neon-text-glow">VERNEX OS</h1>
-            <span class="text-[10px] text-cyan-400 font-bold block mt-1 tracking-wider">@SHAYAN_EXPLORER SYSTEM</span>
+    <header class="border-b border-white/5 py-4 px-8 flex justify-between items-center bg-black/30 backdrop-blur-md sticky top-0 z-40">
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-purple-500/20">
+                <i data-feather="cpu" class="w-5 h-5 text-white"></i>
+            </div>
+            <span class="text-xl font-black tracking-wider text-white">SHAYAN_EXPLORER</span>
         </div>
-        <nav class="flex-1 py-6 space-y-1">
-            <button onclick="switchView('dash')" id="nav-dash" class="w-full flex items-center space-x-3 px-6 py-4 transition nav-active font-bold"><span>📊</span><span>Cluster Overview</span></button>
-            <button onclick="switchView('keys')" id="nav-keys" class="w-full flex items-center space-x-3 px-6 py-4 transition hover:text-cyan-400 text-slate-400 font-bold"><span>🔑</span><span>Key Provisioning</span></button>
-            <button onclick="switchView('logs')" id="nav-logs" class="w-full flex items-center space-x-3 px-6 py-4 transition hover:text-cyan-400 text-slate-400 font-bold"><span>📋</span><span>Telemetry Terminal</span></button>
-        </nav>
-        
-        <div class="p-4 border-t border-slate-900 bg-[#020206] space-y-2">
-            <span class="text-[10px] text-slate-500 uppercase block tracking-wider font-bold">Emergency Switch</span>
-            <button id="systemKillSwitch" onclick="triggerGlobalMuteToggle()" class="w-full py-2 bg-emerald-950/40 text-emerald-400 border border-emerald-900 rounded font-bold text-[10px] transition uppercase tracking-wider">
-                System: Operational
-            </button>
-        </div>
-    </aside>
-
-    <header class="md:hidden w-full bg-[#040409] border-b border-slate-900 p-4 flex justify-between items-center sticky top-0 z-50 backdrop-blur-md">
-        <div>
-            <h1 class="text-xs font-black tracking-widest text-slate-100 uppercase neon-text-glow">VERNEX CORE</h1>
-            <span class="text-[9px] text-cyan-400 block font-mono font-bold">STABLE DISPATCH CONSOLE</span>
-        </div>
-        <div class="text-[10px] font-mono text-cyan-400 font-bold flex items-center space-x-1.5 bg-cyan-950/30 px-2 py-0.5 border border-cyan-900/50 rounded shadow-[0_0_10px_rgba(6,182,212,0.2)]">
-            <span>PING:</span><span id="latencyPing">--</span><span>ms</span>
-        </div>
+        <button onclick="toggleModal(true)" class="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl border border-white/10 text-xs font-bold tracking-wide flex items-center space-x-2 transition">
+            <i data-feather="link-2" class="w-4 h-4"></i> <span>Showcase Active Endpoint Documentation</span>
+        </button>
     </header>
 
-    <main class="flex-1 p-4 md:p-8 overflow-y-auto w-full max-w-7xl mx-auto">
+    <main class="max-w-7xl mx-auto p-6 space-y-8 mt-4">
         
-        <div id="view-dash" class="space-y-6">
-            
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5 font-mono">
-                <div class="glass-panel neon-glow-cyan p-5 rounded-xl">
-                    <span class="text-slate-500 text-[10px] uppercase tracking-wider block font-bold">Active Token Pools</span>
-                    <span class="text-3xl font-bold tracking-tight text-cyan-400 neon-text-glow mt-1 block" id="cardKeys">0</span>
-                </div>
-                <div class="glass-panel neon-glow-emerald p-5 rounded-xl">
-                    <span class="text-slate-500 text-[10px] uppercase tracking-wider block font-bold">Total Platform Revenue</span>
-                    <span class="text-3xl font-bold tracking-tight text-emerald-400 mt-1 block" style="text-shadow: 0 0 8px rgba(16,185,129,0.5);">₹<span id="cardIncome">0</span></span>
-                </div>
-                <div class="glass-panel neon-glow-purple p-5 rounded-xl sm:col-span-2 md:col-span-1">
-                    <span class="text-slate-500 text-[10px] uppercase tracking-wider block font-bold">Logged Telemetry Queries</span>
-                    <span class="text-3xl font-bold tracking-tight text-purple-400 mt-1 block" style="text-shadow: 0 0 8px rgba(139,92,246,0.5);" id="cardVolume">0</span>
-                </div>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div class="lg:col-span-1 glass rounded-2xl p-6 flex flex-col space-y-4">
+                <h2 id="formTitle" class="text-md font-bold tracking-wide text-purple-400 uppercase flex items-center">
+                    <i data-feather="plus-circle" class="mr-2 w-4 h-4"></i> Provision Token Strategy
+                </h2>
+                <form id="keyForm" class="space-y-4">
+                    <div>
+                        <label class="block text-[11px] uppercase text-gray-400 font-bold mb-1">User Identifier Profile</label>
+                        <input type="text" id="clientName" placeholder="Enterprise Client Name" class="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-purple-500 transition" required>
+                    </div>
+                    <div>
+                        <label class="block text-[11px] uppercase text-gray-400 font-bold mb-1">Unique API Token Target Signature</label>
+                        <input type="text" id="apiKey" placeholder="SHAYAN-SECRET-KEY" class="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-sm font-mono focus:outline-none focus:border-purple-500 transition" required>
+                    </div>
+                    <div>
+                        <label class="block text-[11px] uppercase text-gray-400 font-bold mb-1">Daily Access Requests Limit Qty</label>
+                        <input type="number" id="keyLimit" value="500" class="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-purple-500 transition" required>
+                    </div>
+                    <div>
+                        <label class="block text-[11px] uppercase text-gray-400 font-bold mb-1">Expiration Lifespan Bound Context</label>
+                        <input type="datetime-local" id="keyExpire" value="2026-12-31T23:59" class="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-sm font-mono focus:outline-none focus:border-purple-500 transition" required>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-[11px] uppercase text-gray-400 font-bold mb-2">Scope Strategy Authorization Restrictions</label>
+                        <div class="flex items-center space-x-2 mb-2 p-2 bg-white/5 rounded-lg border border-white/5">
+                            <input type="checkbox" id="allToolsCheck" checked onchange="toggleAllTools(this)">
+                            <label for="allToolsCheck" class="text-xs font-bold text-emerald-400">Grant Global Authorization (All Tools)</label>
+                        </div>
+                        <div id="toolsGrid" class="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-1 opacity-40 pointer-events-none transition">
+                            </div>
+                    </div>
+
+                    <div class="flex space-x-2">
+                        <button type="button" id="cancelEditBtn" onclick="resetFormState()" class="hidden w-1/3 py-3 bg-white/5 hover:bg-white/10 text-gray-400 rounded-xl font-bold text-xs transition">Cancel</button>
+                        <button type="submit" id="submitBtn" class="flex-1 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-bold text-xs tracking-wider transition shadow-lg shadow-purple-600/10">PROVISION ACCESS</button>
+                    </div>
+                </form>
             </div>
 
-            <div class="flex flex-col sm:flex-row gap-3 items-center justify-between bg-[#05050c] p-3 rounded-xl border border-slate-900 font-mono text-xs">
-                <div class="w-full sm:w-72">
-                    <input type="text" id="registrySearchInput" oninput="processUIRegistryRender()" placeholder="Filter keys dynamically..." class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-cyan-400 input-cyber">
-                </div>
-                <div class="flex flex-wrap gap-2 w-full sm:w-auto justify-end">
-                    <button onclick="exportDatastoreCSV()" class="px-3 py-2 bg-slate-900/60 border border-slate-800 rounded-lg font-bold text-slate-400 hover:text-slate-200 transition hover:border-slate-700">Export Config CSV</button>
-                    <button onclick="purgeBulkExpiredNodes()" class="px-3 py-2 bg-rose-950/20 border border-rose-900/50 text-rose-400 rounded-lg font-bold hover:bg-rose-950/40 transition">Purge Terminated Entries</button>
-                </div>
-            </div>
-
-            <div class="glass-panel p-4 md:p-6 rounded-xl border border-slate-900/60 shadow-2xl">
-                <h3 class="text-xs font-bold font-mono tracking-widest text-slate-400 uppercase mb-4 flex items-center space-x-2">
-                    <span class="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
-                    <span>Active API Router Cryptographic Allocations</span>
-                </h3>
-                
-                <div class="hidden md:block overflow-x-auto text-xs font-mono">
-                    <table class="w-full text-left border-collapse">
-                        <thead>
-                            <tr class="border-b border-slate-800 text-slate-500 text-[10px] uppercase font-bold tracking-wider">
-                                <th class="pb-3">Client Identifier Node</th>
-                                <th class="pb-3">Token Private Key String</th>
-                                <th class="pb-3">Value</th>
-                                <th class="pb-3">Chrono Countdown Limit</th>
-                                <th class="pb-3 text-center">Engine Directive Controls</th>
+            <div class="lg:col-span-2 glass rounded-2xl p-6 flex flex-col max-h-[640px]">
+                <h2 class="text-sm font-bold uppercase tracking-wider text-indigo-400 mb-4 flex items-center"><i data-feather="shield" class="w-4 h-4 mr-2"></i> Runtime System Database Matrix</h2>
+                <div class="overflow-x-auto flex-1 overflow-y-auto">
+                    <table class="w-full text-left text-xs border-collapse">
+                        <thead class="sticky top-0 bg-[#150f27] z-10 text-gray-400 font-bold uppercase tracking-wider border-b border-white/5">
+                            <tr>
+                                <th class="pb-3">Profile</th>
+                                <th class="pb-3">Key Signature Token</th>
+                                <th class="pb-3">Scope Boundary</th>
+                                <th class="pb-3">Usage Metrices</th>
+                                <th class="pb-3">Expiration Matrix</th>
+                                <th class="pb-3">Status</th>
+                                <th class="pb-3 text-right">Actions</th>
                             </tr>
                         </thead>
-                        <tbody id="dashTableBody" class="divide-y divide-slate-900/60"></tbody>
+                        <tbody id="keysTable" class="divide-y divide-white/5 font-mono"></tbody>
                     </table>
                 </div>
-                
-                <div id="dashMobileCardsStack" class="md:hidden space-y-4 font-mono text-xs"></div>
             </div>
         </div>
 
-        <div id="view-keys" class="hidden max-w-2xl mx-auto glass-panel p-5 md:p-8 rounded-xl shadow-2xl border border-slate-900">
-            <h3 class="text-xs font-bold font-mono tracking-widest text-cyan-400 uppercase mb-6 border-b border-slate-900 pb-3 neon-text-glow">⚙️ Generate Custom Endpoint Allocation Access</h3>
-            <form id="keyForm" class="space-y-4 font-mono text-xs">
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-slate-400 mb-1.5 uppercase tracking-wider text-[10px]">Subscriber Identity Name</label>
-                        <input type="text" id="name" required placeholder="e.g. Enterprise Tier Alpha" class="w-full bg-slate-950 border border-slate-800 px-3 py-2.5 text-cyan-400 rounded-lg input-cyber">
-                    </div>
-                    <div>
-                        <label class="block text-slate-400 mb-1.5 uppercase tracking-wider text-[10px]">Custom Token Key Identifier</label>
-                        <input type="text" id="key" required placeholder="e.g. shayan_premium_node" class="w-full bg-slate-950 border border-slate-800 px-3 py-2.5 text-cyan-400 rounded-lg input-cyber">
-                    </div>
-                </div>
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div>
-                        <label class="block text-slate-400 mb-1.5 uppercase tracking-wider text-[10px]">Price Metrics Valuation (₹)</label>
-                        <input type="number" id="price" value="599" class="w-full bg-slate-950 border border-slate-800 px-3 py-2.5 text-cyan-400 rounded-lg input-cyber">
-                    </div>
-                    <div>
-                        <label class="block text-slate-400 mb-1.5 uppercase tracking-wider text-[10px]">Max Request Daily Threshold Quota</label>
-                        <input type="number" id="daily_limit" value="2500" class="w-full bg-slate-950 border border-slate-800 px-3 py-2.5 text-cyan-400 rounded-lg input-cyber">
-                    </div>
-                    <div>
-                        <div class="flex justify-between items-center mb-1.5">
-                            <label class="block text-slate-400 uppercase tracking-wider text-[10px]">Chrono Expiry Date</label>
-                            <button type="button" onclick="setLifetimeAccessKeyMode()" class="text-[9px] text-cyan-400 hover:text-cyan-300 font-bold bg-transparent border-none p-0 cursor-pointer transition">Set Lifetime Mode</button>
-                        </div>
-                        <input type="text" id="expire_date" placeholder="YYYY-MM-DD or lifetime" required class="w-full bg-slate-950 border border-slate-800 px-3 py-2.5 text-cyan-400 rounded-lg input-cyber">
-                    </div>
-                </div>
-                
-                <div class="bg-slate-950 p-4 rounded-lg border border-slate-900 space-y-3 shadow-inner">
-                    <label class="block text-cyan-400 font-bold uppercase tracking-wider text-[9px]">ROUTING PROXY INSTANCE PERMISSIONS TARGETS CONFIGURATION</label>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-slate-300">
-                        <label class="flex items-center space-x-3 cursor-pointer group"><input type="checkbox" id="allow_number" checked class="w-4 h-4 accent-cyan-500"><span class="group-hover:text-cyan-400 transition">NUMBER LOGISTICS PIPELINE</span></label>
-                        <label class="flex items-center space-x-3 cursor-pointer group"><input type="checkbox" id="allow_vehicle" checked class="w-4 h-4 accent-cyan-500"><span class="group-hover:text-cyan-400 transition">VEHICLE TRACK ENGINE REGISTRY</span></label>
-                        <label class="flex items-center space-x-3 cursor-pointer group"><input type="checkbox" id="allow_aadhar" checked class="w-4 h-4 accent-cyan-500"><span class="group-hover:text-cyan-400 transition">AADHAAR VALIDATION PIPELINE</span></label>
-                        <label class="flex items-center space-x-3 cursor-pointer group"><input type="checkbox" id="allow_family" checked class="w-4 h-4 accent-cyan-500"><span class="group-hover:text-cyan-400 transition">FAMILY MATRIX DATA EXTRACTION</span></label>
-                        <label class="flex items-center space-x-3 cursor-pointer group"><input type="checkbox" id="allow_insta" checked class="w-4 h-4 accent-cyan-500"><span class="group-hover:text-cyan-400 transition">INSTAGRAM INTEL TRACE ROUTE</span></label>
-                    </div>
-                </div>
-
-                <button type="submit" class="w-full bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 font-black py-4 rounded-lg uppercase tracking-widest text-[10px] hover:opacity-90 transition shadow-[0_0_20px_rgba(6,182,212,0.4)]">
-                    Deploy Signed Token to Cluster Mesh Database Router
-                </button>
-            </form>
-        </div>
-
-        <div id="view-logs" class="hidden space-y-4 font-mono text-xs">
-            <div class="flex justify-between items-center bg-[#05050c] p-3 rounded-xl border border-slate-900">
-                <h3 class="text-xs font-bold tracking-widest text-cyan-400 uppercase flex items-center space-x-2">
-                    <span class="inline-block w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>
-                    <span>LIVE PIPELINE CONSOLE FEED</span>
-                </h3>
-                <button onclick="clearSystemTelemetryLogs()" class="px-3 py-1.5 bg-rose-950/40 text-rose-400 border border-rose-900/60 rounded font-bold uppercase text-[10px] transition hover:bg-rose-950/60">Wipe Telemetry Logs</button>
+        <div class="glass rounded-2xl p-6">
+            <h2 class="text-sm font-bold uppercase tracking-wider text-blue-400 mb-4 flex items-center"><i data-feather="activity" class="w-4 h-4 mr-2"></i> System Request Streaming Audit Buffer Logs</h2>
+            <div class="overflow-x-auto max-h-60 overflow-y-auto">
+                <table class="w-full text-left text-xs border-collapse">
+                    <thead class="sticky top-0 bg-[#130b23] border-b border-white/10 text-gray-400 font-bold uppercase">
+                        <tr>
+                            <th class="py-2">Timestamp</th>
+                            <th class="py-2">Client Label</th>
+                            <th class="py-2">Token Value</th>
+                            <th class="py-2">Route Target</th>
+                            <th class="py-2">Param Metadata Queries Search</th>
+                            <th class="py-2">Gateway Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logsTable" class="divide-y divide-white/5 font-mono text-gray-300"></tbody>
+                </table>
             </div>
-            <div class="terminal-box rounded-xl p-4 h-[60vh] overflow-y-auto text-[11px] text-cyan-400/90 space-y-2 shadow-inner" id="logsStream"></div>
         </div>
-
     </main>
 
-    <nav class="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-[#030307] border-t border-slate-900 grid grid-cols-3 z-50 font-mono text-[9px] shadow-[0_-10px_25px_rgba(0,0,0,0.5)]">
-        <button onclick="switchView('dash')" id="m-nav-dash" class="flex flex-col items-center justify-center space-y-1 nav-active text-cyan-400"><span>📊</span><span>Mainframe</span></button>
-        <button onclick="switchView('keys')" id="m-nav-keys" class="flex flex-col items-center justify-center space-y-1 text-slate-400"><span>🔑</span><span>Deploy Token</span></button>
-        <button onclick="switchView('logs')" id="m-nav-logs" class="flex flex-col items-center justify-center space-y-1 text-slate-400"><span>📋</span><span>Telemetry</span></button>
-    </nav>
+    <div id="endpointModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
+        <div class="glass max-w-2xl w-full rounded-2xl p-6 flex flex-col max-h-[85vh]">
+            <div class="flex justify-between items-center mb-4 border-b border-white/5 pb-2">
+                <h3 class="font-bold text-white tracking-wide text-sm uppercase flex items-center"><i data-feather="code" class="text-purple-400 mr-2 w-4 h-4"></i> Uniform Resource Interface Schema (Router Link Engine)</h3>
+                <button onclick="toggleModal(false)" class="text-gray-400 hover:text-white"><i data-feather="x"></i></button>
+            </div>
+            <p class="text-xs text-gray-400 mb-4">Click any structural code component endpoint below to copy it directly to your keyboard storage arrays buffer. Append your authorized secret key param variable token.</p>
+            <div id="modalList" class="space-y-2 overflow-y-auto flex-1 pr-1 font-mono text-xs"></div>
+        </div>
+    </div>
 
     <script>
-        const API_BASE = window.location.origin;
-        let cachedKeys = [];
-        let systemMutexState = true;
+        const toolsList = ["adv","paytm","imei","calltracer","upi","ifsc","number","pincode","ip","challan","ff","bgmi","snap","email","vehicle","git","insta","tg","tgidinfo","numleak"];
+        let localKeysCache = {};
 
-        function setAdaptiveDate() {
-            const now = new Date();
-            document.getElementById('expire_date').value = `2026-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        }
-
-        function setLifetimeAccessKeyMode() {
-            document.getElementById('expire_date').value = "lifetime";
-        }
-
-        function switchView(viewId) {
-            ['dash', 'keys', 'logs'].forEach(v => {
-                document.getElementById(`view-${v}`).classList.add('hidden');
-                const dtNav = document.getElementById(`nav-${v}`);
-                if(dtNav) dtNav.classList.remove('nav-active');
-                document.getElementById(`m-nav-${v}`).classList.remove('nav-active', 'text-cyan-400');
-                document.getElementById(`m-nav-${v}`).classList.add('text-slate-400');
-            });
-            document.getElementById(`view-${viewId}`).classList.remove('hidden');
-            const dtNav = document.getElementById(`nav-${viewId}`);
-            if (dtNav) dtNav.classList.add('nav-active');
-            document.getElementById(`m-nav-${viewId}`).classList.remove('text-slate-400');
-            document.getElementById(`m-nav-${viewId}`).classList.add('nav-active', 'text-cyan-400');
-            if(viewId === 'dash' || viewId === 'logs') syncSystemData();
-        }
-
-        function computeLiveCountdown(targetDateStr) {
-            if (targetDateStr === "lifetime" || !targetDateStr) {
-                return `<span class="text-emerald-400 font-bold tracking-wider text-[10px]" style="text-shadow: 0 0 6px rgba(52,211,153,0.4);">♾️ LIFETIME CONFIG</span>`;
-            }
-            const delta = Date.parse(targetDateStr + "T23:59:59") - Date.parse(new Date());
-            if (delta <= 0) return `<span class="text-rose-500 font-bold tracking-wider uppercase text-[10px] animate-pulse">EXPIRED ENTRY</span>`;
-            const seconds = Math.floor((delta / 1000) % 60);
-            const minutes = Math.floor((delta / 1000 / 60) % 60);
-            const hours = Math.floor((delta / (1000 * 60 * 60)) % 24);
-            const days = Math.floor(delta / (1000 * 60 * 60 * 24));
-            if (days === 0) return `<span class="text-amber-400 font-bold">${hours}h ${minutes}m ${seconds}s</span>`;
-            return `${days}d ${hours}h ${minutes}m`;
-        }
-
-        function runLiveClockTicker() {
-            cachedKeys.forEach(k => {
-                const dCell = document.getElementById(`timer-d-${k.key}`);
-                const mCell = document.getElementById(`timer-m-${k.key}`);
-                const txt = computeLiveCountdown(k.expire_date);
-                if (dCell) dCell.innerHTML = txt;
-                if (mCell) mCell.innerHTML = txt;
-            });
-        }
-
-        function copyRouteToClipboard(tokenValue, endpointName) {
-            let param = "num";
-            if(endpointName === "vehicle") param = "vehicle";
-            if(endpointName === "insta") param = "username";
-            const pathStr = `${API_BASE}/api/${endpointName}?key=${tokenValue}&${param}=`;
-            navigator.clipboard.writeText(pathStr);
-            alert(`Target API endpoint path structure [${endpointName}] saved to active registry memory pipeline.`);
-        }
-
-        async function clearSystemTelemetryLogs() {
-            if (confirm("Execute deletion pipeline across all saved console history metrics?")) {
-                await fetch(`${API_BASE}/api/admin/history`, { method: 'DELETE' });
-                syncSystemData();
-            }
-        }
-
-        async function purgeBulkExpiredNodes() {
-            const todayStr = new Date().toISOString().split('T')[0];
-            const targetsToKill = cachedKeys.filter(k => k.expire_date !== 'lifetime' && k.expire_date < todayStr);
-            if(targetsToKill.length === 0) {
-                alert('Telemetry clean: Zero structurally dead node elements found inside local execution limits.');
-                return;
-            }
-            if(confirm(`Execute total purge execution pipeline across ${targetsToKill.length} expired allocation tokens?`)) {
-                for (let k of targetsToKill) {
-                    await fetch(`${API_BASE}/api/admin/keys/delete`, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ key: k.key })
-                    });
-                }
-                let localVault = JSON.parse(localStorage.getItem('vernex_v5_pro_store') || '[]');
-                localVault = localVault.filter(k => k.expire_date === 'lifetime' || k.expire_date >= todayStr);
-                localStorage.setItem('vernex_v5_pro_store', JSON.stringify(localVault));
-                syncSystemData();
-            }
-        }
-
-        function exportDatastoreCSV() {
-            let rowStrings = ["Subscriber Name,Token Key Identifier string,Allocated Contract valuation,Expiry Boundary Parameter"];
-            cachedKeys.forEach(k => { rowStrings.push(`"${k.name}","${k.key}",${k.price},"${k.expire_date}"`); });
-            const blobObject = new Blob([rowStrings.join("\n")], { type: 'text/csv' });
-            const temporaryAnchor = document.createElement('a');
-            temporaryAnchor.href = URL.createObjectURL(blobObject);
-            temporaryAnchor.download = `vernex_api_registry_ledger_2026.csv`;
-            temporaryAnchor.click();
-        }
-
-        async function triggerGlobalMuteToggle() {
-            systemMutexState = !systemMutexState;
-            const targetButton = document.getElementById('systemKillSwitch');
-            if(!systemMutexState) {
-                targetButton.innerText = "System Status: PAUSED";
-                targetButton.className = "w-full py-2 bg-rose-950/50 text-rose-400 border border-rose-900 rounded font-bold text-[10px] transition uppercase tracking-wider animate-pulse shadow-[0_0_15px_rgba(244,63,94,0.3)]";
-            } else {
-                targetButton.innerText = "System Status: Operational";
-                targetButton.className = "w-full py-2 bg-emerald-950/40 text-emerald-400 border border-emerald-900 rounded font-bold text-[10px] transition uppercase tracking-wider";
-            }
-            await fetch(`${API_BASE}/api/admin/health`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ switch: systemMutexState })
-            });
-        }
-
-        async function dropTokenKeyInstance(targetKeyStr) {
-            if(confirm(`Completely delete and revoke key "${targetKeyStr}"? This status change will instantly notify client requests.`)) {
-                await fetch(`${API_BASE}/api/admin/keys/delete`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ key: targetKeyStr })
-                });
-                let localVault = JSON.parse(localStorage.getItem('vernex_v5_pro_store') || '[]');
-                localVault = localVault.filter(x => x.key !== targetKeyStr);
-                localStorage.setItem('vernex_v5_pro_store', JSON.stringify(localVault));
-                syncSystemData();
-            }
-        }
-
-        async function toggleKeyStatus(keyName, currentStatus) {
-            if(currentStatus === 'deleted') return;
-            await fetch(`${API_BASE}/api/admin/toggle`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ key: keyName })
-            });
-            let localVault = JSON.parse(localStorage.getItem('vernex_v5_pro_store') || '[]');
-            localVault.forEach(x => { if(x.key === keyName) x.status = (currentStatus === 'on' ? 'off' : 'on'); });
-            localStorage.setItem('vernex_v5_pro_store', JSON.stringify(localVault));
-            syncSystemData();
-        }
-
-        function processUIRegistryRender() {
-            const queryFilterPattern = document.getElementById('registrySearchInput').value.toLowerCase();
-            const tableBody = document.getElementById('dashTableBody');
-            const mobileStack = document.getElementById('dashMobileCardsStack');
-            tableBody.innerHTML = ''; mobileStack.innerHTML = '';
-            
-            const matchedFilterKeys = cachedKeys.filter(k => 
-                k.name.toLowerCase().includes(queryFilterPattern) || 
-                k.key.toLowerCase().includes(queryFilterPattern)
-            );
-
-            matchedFilterKeys.forEach(k => {
-                let statusBadgeText = k.status.toUpperCase();
-                let stateClass = 'text-cyan-400 border-cyan-950/60 bg-cyan-950/20 hover:bg-cyan-950/40 shadow-[0_0_8px_rgba(6,182,212,0.15)]';
-                
-                if (k.status === 'off') {
-                    statusBadgeText = "ADMIN OFF";
-                    stateClass = 'text-amber-400 border-amber-950/60 bg-amber-950/20 hover:bg-amber-950/40 shadow-[0_0_8px_rgba(245,158,11,0.15)]';
-                } else if (k.status === 'deleted') {
-                    statusBadgeText = "DELETED BY ADMIN";
-                    stateClass = 'text-rose-400 border-rose-950 bg-rose-950/30 font-black animate-pulse shadow-[0_0_12px_rgba(244,63,94,0.2)]';
-                }
-                
-                const tableRowHtml = `
-                    <tr class="border-b border-slate-900/60 hover:bg-slate-950/30 transition">
-                        <td class="py-4 font-bold text-slate-200">${k.name}</td>
-                        <td class="py-4">
-                            <div class="space-y-1">
-                                <div class="flex items-center space-x-2">
-                                    <code class="text-cyan-400 bg-slate-950/80 px-2 py-0.5 rounded border border-slate-800/80">${k.key}</code>
-                                </div>
-                                <div class="flex flex-wrap gap-1.5 text-[9px] font-bold text-slate-500 font-mono tracking-wider">
-                                    <button onclick="copyRouteToClipboard('${k.key}', 'number')" class="hover:text-cyan-400 transition">[NUM]</button>
-                                    <button onclick="copyRouteToClipboard('${k.key}', 'vehicle')" class="hover:text-cyan-400 transition">[VEH]</button>
-                                    <button onclick="copyRouteToClipboard('${k.key}', 'aadhar')" class="hover:text-cyan-400 transition">[ADR]</button>
-                                    <button onclick="copyRouteToClipboard('${k.key}', 'adharfamily')" class="hover:text-cyan-400 transition">[FAM]</button>
-                                    <button onclick="copyRouteToClipboard('${k.key}', 'insta')" class="hover:text-cyan-400 transition">[INS]</button>
-                                </div>
-                            </div>
-                        </td>
-                        <td class="py-4 text-emerald-400 font-mono font-bold">₹${k.price}</td>
-                        <td class="py-4 font-bold text-cyan-400/90" id="timer-d-${k.key}">${computeLiveCountdown(k.expire_date)}</td>
-                        <td class="py-4 text-center space-x-2">
-                            <button onclick="toggleKeyStatus('${k.key}', '${k.status}')" class="px-2 py-1 border text-[10px] rounded font-bold transition ${stateClass}">${statusBadgeText}</button>
-                            <button onclick="dropTokenKeyInstance('${k.key}')" class="px-2 py-1 border border-rose-950 text-rose-400 text-[10px] rounded font-bold hover:bg-rose-950/30 transition">PURGE</button>
-                        </td>
-                    </tr>`;
-
-                tableBody.innerHTML += tableRowHtml;
-
-                mobileStack.innerHTML += `
-                    <div class="glass-panel p-4 rounded-xl space-y-2 border border-slate-900/60 shadow-lg relative overflow-hidden">
-                        <div class="flex justify-between items-center">
-                            <span class="text-slate-200 font-bold">${k.name}</span>
-                            <span class="text-emerald-400 font-mono font-bold">₹${k.price}</span>
-                        </div>
-                        <code class="text-cyan-400 block text-[11px] bg-slate-950 p-2 rounded text-center border border-slate-900 select-all">${k.key}</code>
-                        <div class="flex justify-between gap-2 text-[10px] py-1.5 border-b border-slate-900 text-slate-400 font-bold">
-                            <button onclick="copyRouteToClipboard('${k.key}', 'number')" class="hover:text-cyan-400">NUM</button>
-                            <button onclick="copyRouteToClipboard('${k.key}', 'vehicle')" class="hover:text-cyan-400">VEH</button>
-                            <button onclick="copyRouteToClipboard('${k.key}', 'aadhar')" class="hover:text-cyan-400">ADR</button>
-                            <button onclick="copyRouteToClipboard('${k.key}', 'adharfamily')" class="hover:text-cyan-400">FAM</button>
-                            <button onclick="copyRouteToClipboard('${k.key}', 'insta')" class="hover:text-cyan-400">INS</button>
-                        </div>
-                        <div class="flex justify-between items-center text-[10px] pt-1">
-                            <span id="timer-m-${k.key}" class="font-bold text-cyan-400">${computeLiveCountdown(k.expire_date)}</span>
-                            <div class="space-x-1">
-                                <button onclick="toggleKeyStatus('${k.key}', '${k.status}')" class="px-2 py-0.5 border text-[9px] rounded font-bold ${stateClass}">${statusBadgeText}</button>
-                                <button onclick="dropTokenKeyInstance('${k.key}')" class="px-1.5 py-0.5 border border-rose-900 text-rose-400 rounded text-[9px]">PURGE</button>
-                            </div>
-                        </div>
+        function initToolsCheckboxes() {
+            const grid = document.getElementById('toolsGrid');
+            grid.innerHTML = '';
+            toolsList.forEach(t => {
+                grid.innerHTML += `
+                    <div class="flex items-center space-x-2 bg-black/20 p-1.5 rounded-lg border border-white/5 hover:border-white/10">
+                        <input type="checkbox" value="${t}" id="chk-${t}" class="tool-chk">
+                        <label for="chk-${t}" class="text-[11px] tracking-wide text-gray-300 font-medium capitalize">${t}</label>
                     </div>`;
             });
         }
 
-        async function syncSystemData() {
-            let backup = JSON.parse(localStorage.getItem('vernex_v5_pro_store') || '[]');
-            if (backup.length > 0) {
-                try {
-                    await fetch(`${API_BASE}/api/admin/keys`, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ sync_list: backup })
-                    });
-                } catch(e){}
+        function toggleAllTools(src) {
+            const grid = document.getElementById('toolsGrid');
+            if(src.checked) {
+                grid.classList.add('opacity-40', 'pointer-events-none');
+            } else {
+                grid.classList.remove('opacity-40', 'pointer-events-none');
             }
+        }
 
-            try {
-                const res = await fetch(`${API_BASE}/api/admin/keys`);
-                const data = await res.json();
-                if (data && data.keys && data.keys.length > 0) {
-                    cachedKeys = data.keys;
-                    localStorage.setItem('vernex_v5_pro_store', JSON.stringify(cachedKeys));
-                } else { cachedKeys = backup; }
-            } catch(e) { cachedKeys = backup; }
-
-            let revenue = 0;
-            cachedKeys.forEach(x => { if(x.status === 'on') revenue += parseFloat(x.price || 0); });
-            document.getElementById('cardKeys').innerText = cachedKeys.length;
-            document.getElementById('cardIncome').innerText = revenue;
-
-            processUIRegistryRender();
-
-            try {
-                const logsRes = await fetch(`${API_BASE}/api/admin/history`);
-                const logsData = await logsRes.json();
-                document.getElementById('cardVolume').innerText = logsData.history.length;
-                const logsContainer = document.getElementById('logsStream');
-                const isScrolledToBottom = (logsContainer.scrollHeight - logsContainer.clientHeight) <= (logsContainer.scrollTop + 4);
-                
-                logsContainer.innerHTML = '';
-                logsData.history.forEach(l => {
-                    logsContainer.innerHTML += `<div>[${l.timestamp}] <span class="text-purple-400">[${l.type}]</span> Node: "${l.client_name}" ➔ Input: <span class="text-slate-400">"${l.query}"</span> ➔ Code: <span class="text-emerald-400">${l.status_code} OK</span></div>`;
+        function toggleModal(open) {
+            const modal = document.getElementById('endpointModal');
+            modal.style.display = open ? 'flex' : 'none';
+            if(open) {
+                const host = window.location.origin;
+                const list = document.getElementById('modalList');
+                list.innerHTML = '';
+                toolsList.forEach(t => {
+                    const sampleUrl = `${host}/api/${t}?key=YOUR_KEY&${t=== 'email' ? 'email=test@gmail.com' : t==='vehicle'?'vehicle=MH02':'num=9876543210'}`;
+                    list.innerHTML += `
+                        <div onclick="copyText('${sampleUrl}')" class="p-2.5 bg-black/40 hover:bg-purple-600/10 border border-white/5 hover:border-purple-500/30 rounded-xl cursor-pointer transition flex justify-between items-center group">
+                            <span class="text-purple-300 truncate mr-2">${sampleUrl}</span>
+                            <i data-feather="copy" class="w-3.5 h-3.5 text-gray-500 group-hover:text-purple-400 flex-shrink-0"></i>
+                        </div>`;
                 });
-                if (isScrolledToBottom) logsContainer.scrollTop = logsContainer.scrollHeight;
-            } catch(e){}
+                feather.replace();
+            }
+        }
+
+        function copyText(txt) {
+            navigator.clipboard.writeText(txt);
+            alert("Endpoint string copied successfully to operations clipboard matrix.");
+        }
+
+        async function fetchState() {
+            const res = await fetch('/api/admin/keys');
+            const data = await res.json();
+            const table = document.getElementById('keysTable');
+            table.innerHTML = '';
+            localKeysCache = {};
+
+            data.forEach(k => {
+                localKeysCache[k.key] = k;
+                const isAll = k.tools.includes('all');
+                const badge = isAll ? 'GLOBAL' : `${k.tools.length} Tools Restricted`;
+                const isSuspended = k.status === 'Suspended';
+                
+                table.innerHTML += `
+                    <tr class="hover:bg-white/5 transition ${isSuspended ? 'opacity-40' : ''}">
+                        <td class="py-4 font-sans font-bold text-white">${k.name}</td>
+                        <td class="py-4 text-purple-400 font-bold font-mono text-[11px]">${k.key}</td>
+                        <td class="py-4"><span class="px-2 py-0.5 rounded border text-[10px] font-bold ${isAll?'bg-emerald-500/10 text-emerald-400 border-emerald-500/20':'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}">${badge}</span></td>
+                        <td class="py-4 text-gray-300">${k.used} / <span class="text-gray-500">${k.limit}</span></td>
+                        <td class="py-4 text-gray-400 text-[11px]">${k.expire_date.replace('T', ' ')}</td>
+                        <td class="py-4">
+                            <span class="text-[10px] font-bold ${isSuspended?'text-rose-400':'text-emerald-400'}">${k.status.toUpperCase()}</span>
+                        </td>
+                        <td class="py-4 text-right space-x-1">
+                            <button onclick="toggleSuspend('${k.key}', '${k.status}')" class="p-1.5 rounded hover:bg-white/5 text-amber-400" title="Suspend/Resume Framework Layer"><i data-feather="${isSuspended?'play':'square'}" class="w-3.5 h-3.5"></i></button>
+                            <button onclick="triggerEdit('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-blue-400" title="Modify Configuration Rules Parameter"><i data-feather="edit-3" class="w-3.5 h-3.5"></i></button>
+                            <button onclick="dropKey('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-rose-400" title="Revoke Footprint Structural Access Allocation"><i data-feather="trash-2" class="w-3.5 h-3.5"></i></button>
+                        </td>
+                    </tr>`;
+            });
+            feather.replace();
+        }
+
+        async function fetchLogs() {
+            const res = await fetch('/api/admin/logs');
+            const data = await res.json();
+            const table = document.getElementById('logsTable');
+            table.innerHTML = data.length === 0 ? `<tr><td colspan="6" class="py-4 text-center text-gray-500 font-sans">Streaming tracking buffer queue is currently empty.</td></tr>` : '';
+            
+            data.forEach(l => {
+                table.innerHTML += `
+                    <tr class="hover:bg-white/5 transition">
+                        <td class="py-2 text-gray-500 text-[11px]">${l.timestamp}</td>
+                        <td class="py-2 font-sans text-white">${l.key_name}</td>
+                        <td class="py-2 text-purple-400">${l.key}</td>
+                        <td class="py-2"><span class="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 rounded border border-blue-500/20 text-[10px] font-bold">${l.tool}</span></td>
+                        <td class="py-2 text-amber-300 max-w-[180px] truncate">${l.search}</td>
+                        <td class="py-2"><span class="text-emerald-400 font-bold">${l.status}</span></td>
+                    </tr>`;
+            });
         }
 
         document.getElementById('keyForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const newKeyObj = {
-                name: document.getElementById('name').value,
-                key: document.getElementById('key').value,
-                price: document.getElementById('price').value,
-                daily_limit: document.getElementById('daily_limit').value,
-                expire_date: document.getElementById('expire_date').value,
-                status: "on",
-                deleted_by_admin: false,
-                allow_number: document.getElementById('allow_number').checked ? "true" : "false",
-                allow_vehicle: document.getElementById('allow_vehicle').checked ? "true" : "false",
-                allow_aadhar: document.getElementById('allow_aadhar').checked ? "true" : "false",
-                allow_family: document.getElementById('allow_family').checked ? "true" : "false",
-                allow_insta: document.getElementById('allow_insta').checked ? "true" : "false"
+            const isGlobal = document.getElementById('allToolsCheck').checked;
+            let selectedTools = ['all'];
+            
+            if(!isGlobal) {
+                selectedTools = Array.from(document.querySelectorAll('.tool-chk:checked')).map(c => c.value);
+                if(selectedTools.length === 0) {
+                    alert("Please select at least one specific tool if Global access is disabled.");
+                    return;
+                }
+            }
+
+            const payload = {
+                name: document.getElementById('clientName').value,
+                key: document.getElementById('apiKey').value,
+                limit: document.getElementById('keyLimit').value,
+                expire_date: document.getElementById('keyExpire').value,
+                tools: selectedTools
             };
 
-            await fetch(`${API_BASE}/api/admin/keys`, {
+            await fetch('/api/admin/keys', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(newKeyObj)
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             });
 
-            let localVault = JSON.parse(localStorage.getItem('vernex_v5_pro_store') || '[]');
-            localVault.push(newKeyObj);
-            localStorage.setItem('vernex_v5_pro_store', JSON.stringify(localVault));
-
-            document.getElementById('keyForm').reset();
-            setAdaptiveDate();
-            switchView('dash');
+            resetFormState();
+            fetchState();
         });
 
-        async function runNetworkLatencyPing() {
-            const start = performance.now();
-            try {
-                await fetch(`${API_BASE}/api/admin/keys`);
-                document.getElementById('latencyPing').innerText = Math.round(performance.now() - start);
-            } catch(e){}
+        function triggerEdit(keyId) {
+            const k = localKeysCache[keyId];
+            if(!k) return;
+
+            document.getElementById('formTitle').innerHTML = `<i data-feather="edit" class="mr-2 w-4 h-4 text-blue-400"></i> Modify Active Token Profile`;
+            document.getElementById('clientName').value = k.name;
+            document.getElementById('apiKey').value = k.key;
+            document.getElementById('apiKey').readOnly = true; // Key string is the unique master ID reference
+            document.getElementById('keyLimit').value = k.limit;
+            document.getElementById('keyExpire').value = k.expire_date;
+            
+            const isAll = k.tools.includes('all');
+            document.getElementById('allToolsCheck').checked = isAll;
+            toggleAllTools({checked: isAll});
+
+            document.querySelectorAll('.tool-chk').forEach(chk => {
+                chk.checked = !isAll && k.tools.includes(chk.value);
+            });
+
+            document.getElementById('cancelEditBtn').classList.remove('hidden');
+            document.getElementById('submitBtn').innerText = "SAVE MODIFICATIONS";
+            feather.replace();
         }
 
-        window.addEventListener('pageshow', syncSystemData);
-        window.addEventListener('focus', syncSystemData);
+        function resetFormState() {
+            document.getElementById('formTitle').innerHTML = `<i data-feather="plus-circle" class="mr-2 w-4 h-4"></i> Provision Token Strategy`;
+            document.getElementById('keyForm').reset();
+            document.getElementById('apiKey').readOnly = false;
+            document.getElementById('keyExpire').value = "2026-12-31T23:59";
+            toggleAllTools({checked: true});
+            document.getElementById('cancelEditBtn').add('hidden');
+            document.getElementById('submitBtn').innerText = "PROVISION ACCESS";
+            feather.replace();
+        }
 
-        window.onload = () => {
-            setAdaptiveDate();
-            syncSystemData();
-            setInterval(syncSystemData, 4000);
-            setInterval(runLiveClockTicker, 1000);
-            setInterval(runNetworkLatencyPing, 8000);
-        };
+        async function toggleSuspend(keyId, currentStatus) {
+            const nextStatus = currentStatus === 'Active' ? 'Suspended' : 'Active';
+            await fetch('/api/admin/keys/status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: keyId, status: nextStatus })
+            });
+            fetchState();
+        }
+
+        async function dropKey(keyId) {
+            if(confirm("Permanently wipe this routing token transaction permission architecture footprint?")) {
+                await fetch(`/api/admin/keys/delete/${keyId}`, { method: 'DELETE' });
+                fetchState();
+            }
+        }
+
+        initToolsCheckboxes();
+        fetchState();
+        fetchLogs();
+        setInterval(fetchLogs, 3000);
+        setTimeout(() => { feather.replace(); }, 400);
     </script>
 </body>
 </html>
