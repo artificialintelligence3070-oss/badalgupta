@@ -351,17 +351,29 @@ def check_key_validity(api_key, tool_name):
 
 def sanitize_payload(data):
     banned = ["@ftgamer2", "@bornex", "Ultra", "ft-osint", "duckdns"]
+    
+    # 1. Handle Dictionary Data Types safely
     if isinstance(data, dict):
-        return {k: sanitize_payload(v) for k, v in data.items() if not any(b in str(k) for b in banned)}
+        cleaned_dict = {}
+        for k, v in data.items():
+            # Check keys for banned names
+            if any(b in str(k) for b in banned):
+                continue
+            cleaned_dict[k] = sanitize_payload(v)
+        return cleaned_dict
+        
+    # 2. Handle List Data Types safely
     elif isinstance(data, list):
         return [sanitize_payload(i) for i in data]
+        
+    # 3. Handle String Data Types safely (Fixes the crash bug!)
     elif isinstance(data, str):
-        # Swap out specific telegram channels or branding lines for your custom branding
         if "https://t.me/lynx_api" in data:
             data = data.replace("https://t.me/lynx_api", "https://t.me/shayan_explorer_channel")
         for b in banned:
             data = data.replace(b, "SHAYAN_EXPLORER")
         return data
+        
     return data
 
 @app.route('/')
