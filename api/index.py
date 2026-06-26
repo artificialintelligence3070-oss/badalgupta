@@ -9,6 +9,7 @@ app = Flask(__name__)
 TARGET_API_BASE = "https://ft-osint-api.duckdns.org/api"
 UPSTREAM_DEFAULT_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
 
+# इन-मेमरी डेटाबेस संरचना
 DB = {
     "keys": {
         "SHAYAN-MASTER": {
@@ -350,28 +351,36 @@ def check_key_validity(api_key, tool_name):
     return True, key_data
 
 def sanitize_payload(data):
+    """
+    सुरक्षित रीकर्शन फ़ंक्शन जो बिना क्रैश हुए पेलोड से प्रतिबंधित 
+    शब्दों को हटाता है और टेलीग्राम लिंक बदलता है।
+    """
     banned = ["@ftgamer2", "@bornex", "Ultra", "ft-osint", "duckdns"]
     
-    # 1. Handle Dictionary Data Types safely
-    if isinstance(data, dict):
-        cleaned_dict = {}
-        for k, v in data.items():
-            # Check keys for banned names
-            if any(b in str(k) for b in banned):
-                continue
-            cleaned_dict[k] = sanitize_payload(v)
-        return cleaned_dict
-        
-    # 2. Handle List Data Types safely
-    elif isinstance(data, list):
-        return [sanitize_payload(i) for i in data]
-        
-    # 3. Handle String Data Types safely (Fixes the crash bug!)
-    elif isinstance(data, str):
-        if "https://t.me/lynx_api" in data:
-            data = data.replace("https://t.me/lynx_api", "https://t.me/shayan_explorer_channel")
-        for b in banned:
-            data = data.replace(b, "SHAYAN_EXPLORER")
+    try:
+        # 1. यदि डेटा डिक्शनरी (dict) है
+        if isinstance(data, dict):
+            cleaned_dict = {}
+            for k, v in data.items():
+                if any(b in str(k) for b in banned):
+                    continue
+                cleaned_dict[k] = sanitize_payload(v)
+            return cleaned_dict
+            
+        # 2. यदि डेटा लिस्ट (list) है
+        elif isinstance(data, list):
+            return [sanitize_payload(i) for i in data]
+            
+        # 3. यदि डेटा स्ट्रिंग (str) है
+        elif isinstance(data, str):
+            if "https://t.me/lynx_api" in data:
+                data = data.replace("https://t.me/lynx_api", "https://t.me/shayan_explorer_channel")
+            for b in banned:
+                data = data.replace(b, "SHAYAN_EXPLORER")
+            return data
+            
+    except Exception:
+        # अगर कोई अनपेक्षित डेटा स्ट्रक्चर आए तो क्रैश होने के बजाय सीधे डेटा पास करें
         return data
         
     return data
@@ -427,6 +436,7 @@ def proxy_gateway(tool):
     user_key = request.args.get('key')
     if not user_key:
         return jsonify({"status": "error", "developer": "SHAYAN_EXPLORER", "message": "Missing key parameters."}), 401
+    
     is_valid, result = check_key_validity(user_key, tool)
     if not is_valid:
         return jsonify({"status": "error", "developer": "SHAYAN_EXPLORER", "message": result}), 403
@@ -460,9 +470,11 @@ def proxy_gateway(tool):
         "status": "Success" if response.status_code == 200 else "Failed"
     })
 
+    # फाइनल रिस्पॉन्स फ़ॉर्मेटिंग - यहाँ हम सुनिश्चित करते हैं कि डेवलपर हमेशा आप ही रहें
     if isinstance(response_data, dict):
         response_data["developer"] = "SHAYAN_EXPLORER"
-        response_data["status"] = "SUCCESS"
+        if "status" not in response_data:
+            response_data["status"] = "SUCCESS"
 
     return jsonify(response_data), response.status_code
 
