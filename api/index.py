@@ -10,11 +10,8 @@ app = Flask(__name__)
 TARGET_API_BASE = "https://ft-osint-api.duckdns.org/api"
 UPSTREAM_DEFAULT_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
 
-# इन-मेमरी डेटाबेस विथ री-हाइड्रेशन आर्किटेक्चर
+# इन-मेमरी डेटाबेस जो री-हाइड्रेशन फॉलबैक के साथ काम करता है
 DB = {
-    "settings": {
-        "auto_reset": True  # डिफ़ॉल्ट रूप से ऑटो-रीसेट चालू रहेगा
-    },
     "keys": {
         "SHAYAN-MASTER": {
             "name": "Master Enterprise Dev",
@@ -36,7 +33,7 @@ SUPPORTED_TOOLS = [
     "tgidinfo", "numleak", "pan", "adharfamily", "aadhar"
 ]
 
-# --- HTML DASHBOARD विथ लाइव 10S रीसेट टॉगल स्विच ---
+# --- QUANTUM DASHBOARD UI TEMPLATE ---
 HTML_DASHBOARD = """
 <!DOCTYPE html>
 <html lang="en">
@@ -71,17 +68,6 @@ HTML_DASHBOARD = """
             </div>
         </div>
         
-        <div class="flex items-center space-x-3 bg-purple-950/30 border border-purple-500/20 px-4 py-2 rounded-xl">
-            <div class="text-left">
-                <span class="text-[10px] uppercase font-bold text-purple-300 block">10s Auto-Reset Engine</span>
-                <span id="switchStatusLabel" class="text-[9px] text-emerald-400 font-mono">ACTIVE (LOOPING)</span>
-            </div>
-            <label class="relative inline-flex items-center cursor-pointer select-none">
-                <input type="checkbox" id="autoResetSwitch" checked onchange="toggleAutoResetMode(this)" class="sr-only peer">
-                <div class="w-11 h-6 bg-white/10 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-gray-300 after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gradient-to-r peer-checked:from-purple-500 peer-checked:to-indigo-500"></div>
-            </label>
-        </div>
-
         <div class="flex items-center space-x-6 bg-black/30 px-4 py-1.5 rounded-xl border border-white/5 text-xs">
             <div class="text-center">
                 <span class="text-gray-400 block text-[9px] uppercase font-bold">Total Key Registry</span>
@@ -92,13 +78,18 @@ HTML_DASHBOARD = """
                 <span class="text-gray-400 block text-[9px] uppercase font-bold">Success Stream</span>
                 <span id="statSuccess" class="font-mono text-emerald-400 font-bold">0</span>
             </div>
+            <div class="w-px h-6 bg-white/10"></div>
+            <div class="text-center">
+                <span class="text-gray-400 block text-[9px] uppercase font-bold">Failed Block</span>
+                <span id="statFailed" class="font-mono text-rose-400 font-bold">0</span>
+            </div>
         </div>
 
         <div class="flex items-center space-x-2">
             <button onclick="toggleModal(true)" class="px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-xl border border-purple-500/20 text-xs font-bold tracking-wide flex items-center space-x-2 transition">
                 <i data-feather="code" class="w-4 h-4"></i> <span>API Routes Guide</span>
             </button>
-            <button onclick="syncClientToServerFallback()" class="p-2 bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5 rounded-xl transition" title="Force Sync Matrix">
+            <button onclick="syncClientToServerFallback()" class="p-2 bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5 rounded-xl transition" title="Force State Sync">
                 <i data-feather="refresh-cw" class="w-4 h-4"></i>
             </button>
         </div>
@@ -176,7 +167,7 @@ HTML_DASHBOARD = """
                                 <th class="pb-3 pr-2">Profile ID</th>
                                 <th class="pb-3 pr-2">Token Signature</th>
                                 <th class="pb-3 pr-2">Scope Scope</th>
-                                <th class="pb-3 pr-2">Request Limit Usage</th>
+                                <th class="pb-3 pr-2">Quota Analytics Usage Meter</th>
                                 <th class="pb-3 pr-2">Expiration</th>
                                 <th class="pb-3 pr-2">Status</th>
                                 <th class="pb-3 text-right">Actions</th>
@@ -240,7 +231,6 @@ HTML_DASHBOARD = """
     <script>
         const toolsList = ["adv","paytm","imei","calltracer","upi","ifsc","number","pincode","ip","challan","ff","bgmi","snap","email","vehicle","git","insta","tg","tgidinfo","numleak","pan","adharfamily","aadhar"];
         let localKeysCache = {};
-        let isAutoResetActive = true;
 
         function initLocalStorageBackup() {
             if(!localStorage.getItem('SHAYAN_BACKED_KEYS')) {
@@ -249,84 +239,37 @@ HTML_DASHBOARD = """
                 };
                 localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(defaultPool));
             }
-            if(localStorage.getItem('SHAYAN_AUTO_RESET_STATE') !== null) {
-                isAutoResetActive = localStorage.getItem('SHAYAN_AUTO_RESET_STATE') === 'true';
-                document.getElementById('autoResetSwitch').checked = isAutoResetActive;
-                updateSwitchLabel(isAutoResetActive);
-            }
-        }
-
-        function updateSwitchLabel(isActive) {
-            const lbl = document.getElementById('switchStatusLabel');
-            if(isActive) {
-                lbl.innerText = "ACTIVE (LOOPING 10S)";
-                lbl.className = "text-[9px] text-emerald-400 font-mono font-bold animate-pulse";
-            } else {
-                lbl.innerText = "MANUAL RESTART MODE";
-                lbl.className = "text-[9px] text-amber-400 font-mono font-bold";
-            }
-        }
-
-        async function toggleAutoResetMode(src) {
-            isAutoResetActive = src.checked;
-            localStorage.setItem('SHAYAN_AUTO_RESET_STATE', isAutoResetActive);
-            updateSwitchLabel(isAutoResetActive);
-            
-            // सर्वर को स्विच की स्टेट इन्फॉर्म करें 
-            await fetch('/api/admin/settings/toggle', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ auto_reset: isAutoResetActive })
-            });
         }
 
         async function syncClientToServerFallback() {
             initLocalStorageBackup();
             const localPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
+            
             try {
                 await fetch('/api/admin/keys/sync', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        keys: Object.values(localPool),
-                        auto_reset: isAutoResetActive
-                    })
+                    body: JSON.stringify({ keys: Object.values(localPool) })
                 });
-            } catch(err) { console.error("Sync Failure: ", err); }
+            } catch(err) { console.error("Sync Failure Intercepted: ", err); }
+            
             fetchState();
         }
 
-        // 🌟 AUTOMATIC 10-SECOND RESTART CONTROLLER ENGINE
-        setInterval(async () => {
-            if (!isAutoResetActive) return; // अगर स्विच ऑफ है तो कुछ मत करो
-            
-            try {
-                const res = await fetch('/api/admin/keys/reset-loop', { method: 'POST' });
-                const data = await res.json();
-                if(data.status === 'success') {
-                    // लोकल स्टोरेज कैशे कीज़ को भी 0 रीसेट पर सिंक्रोनाइज़ करें
-                    const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
-                    for (const keyId in clientBackupPool) {
-                        clientBackupPool[keyId].used = 0;
-                    }
-                    localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
-                    fetchState(); // रीसेट डेटा को यूआई मैट्रिक्स टेबल में रेंडर करें
-                }
-            } catch (e) { console.error("Reset Engine Idling Exception."); }
-        }, 10000); // सटीक 10 सेकंड्स लूप टाइमर
-
-        // 🛠️ MANUALLY RESTART SINGLE KEY LIMIT BUTTON
+        // 🛠️ मैन्युअली सिंगल की (Key) की लिमिट को रीस्टार्ट करने का फ्रंटएंड फ़ंक्शन
         async function manuallyRestartKeyLimit(keyId) {
             const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
             if(clientBackupPool[keyId]) clientBackupPool[keyId].used = 0;
             localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
 
-            await fetch('/api/admin/keys/manual-reset', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ key: keyId })
-            });
-            alert(`Key [${keyId}] Limit Restarts Successfully.`);
+            try {
+                await fetch('/api/admin/keys/manual-reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: keyId })
+                });
+                alert(`API Key [${keyId}] limit restarted successfully.`);
+            } catch(err) { console.error("Reset Request Failed: ", err); }
             fetchState();
         }
 
@@ -346,7 +289,7 @@ HTML_DASHBOARD = """
                         <input type="checkbox" value="${t}" id="chk-${t}" class="tool-chk accent-purple-600">
                         <label for="chk-${t}" class="text-[11px] tracking-wide text-gray-300 font-medium capitalize cursor-pointer select-none">${t}</label>
                     </div>`;
-                sandboxSelect.innerHTML += `<option value="${t}" class="bg-[#120b24] capitalize">${t.toUpperCase()} Module</option>`;
+                sandboxSelect.innerHTML += `<option value="${t}" class="bg-[#120b24] capitalize">${t.toUpperCase()} Service Module</option>`;
             });
         }
 
@@ -382,7 +325,7 @@ HTML_DASHBOARD = """
 
         function copyText(txt) {
             navigator.clipboard.writeText(txt);
-            alert("Endpoint copied.");
+            alert("Endpoint string copied successfully.");
         }
 
         async function fetchState() {
@@ -421,8 +364,8 @@ HTML_DASHBOARD = """
                         <td class="py-3 text-gray-400 text-[11px] pr-2">${k.expire_date.replace('T', ' ')}</td>
                         <td class="py-3 pr-2"><span class="text-[10px] font-bold ${isSuspended?'text-rose-400':'text-emerald-400'}">${k.status.toUpperCase()}</span></td>
                         <td class="py-3 text-right space-x-1 whitespace-nowrap">
-                            <button onclick="manuallyRestartKeyLimit('${k.key}')" class="p-1.5 rounded border border-amber-500/10 bg-amber-500/5 hover:bg-amber-500/20 text-amber-400 inline-block text-[10px] font-bold px-2 py-1" title="Manual Limit Restart">Restart Limit</button>
-                            <button onclick="toggleSuspend('${k.key}', '${k.status}')" class="p-1.5 rounded hover:bg-white/5 text-purple-400 inline-block"><i data-feather="${isSuspended?'play':'square'}" class="w-3.5 h-3.5"></i></button>
+                            <button onclick="manuallyRestartKeyLimit('${k.key}')" class="px-2 py-1 text-[10px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg hover:bg-amber-500/20 transition" title="Restart Limit Manually">Restart Limit</button>
+                            <button onclick="toggleSuspend('${k.key}', '${k.status}')" class="p-1.5 rounded hover:bg-white/5 text-amber-400 inline-block"><i data-feather="${isSuspended?'play':'square'}" class="w-3.5 h-3.5"></i></button>
                             <button onclick="triggerEdit('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-blue-400 inline-block"><i data-feather="edit-3" class="w-3.5 h-3.5"></i></button>
                             <button onclick="dropKey('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-rose-400 inline-block"><i data-feather="trash-2" class="w-3.5 h-3.5"></i></button>
                         </td>
@@ -435,7 +378,9 @@ HTML_DASHBOARD = """
             const res = await fetch('/api/admin/logs');
             const data = await res.json();
             const table = document.getElementById('logsTable');
+            
             let successfulLogsCount = 0;
+            let failedLogsCount = 0;
 
             if(data.length === 0) {
                 table.innerHTML = `<tr><td colspan="6" class="py-4 text-center text-gray-500 font-sans">Audit stream trace is currently empty.</td></tr>`;
@@ -444,7 +389,8 @@ HTML_DASHBOARD = """
 
             table.innerHTML = '';
             data.forEach(l => {
-                if(l.status === "Success") successfulLogsCount++;
+                if(l.status === "Success") successfulLogsCount++; else failedLogsCount++;
+                
                 table.innerHTML += `
                     <tr class="hover:bg-white/5 transition log-row-item">
                         <td class="py-2 text-gray-500 text-[11px]">${l.timestamp}</td>
@@ -455,14 +401,16 @@ HTML_DASHBOARD = """
                         <td class="py-2"><span class="text-emerald-400 font-bold">${l.status}</span></td>
                     </tr>`;
             });
+            
             document.getElementById('statSuccess').innerText = successfulLogsCount;
+            document.getElementById('statFailed').innerText = failedLogsCount;
         }
 
         async function runSandboxTest() {
             const tool = document.getElementById('sandboxTool').value;
             const key = document.getElementById('sandboxKey').value;
             const param = document.getElementById('sandboxParam').value;
-            if(!key || !param) return alert("Fill parameters.");
+            if(!key || !param) return alert("Please fill up required inputs.");
             
             const localPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
             if (localPool[key]) {
@@ -474,18 +422,21 @@ HTML_DASHBOARD = """
             }
 
             const url = `/api/${tool}?key=${key}&num=${param}&email=${param}&vehicle=${param}&pan=${param}`;
-            document.getElementById('sandboxPre').innerText = "Processing live stream...";
+            document.getElementById('sandboxPre').innerText = "Querying live backend engine routes...";
             document.getElementById('sandboxModal').classList.remove('hidden');
             
             try {
                 const r = await fetch(url);
                 const d = await r.json();
                 document.getElementById('sandboxPre').innerText = JSON.stringify(d, null, 4);
-                if(d.status && d.status !== "error" && localPool[key]) {
-                    localPool[key].used = (localPool[key].used || 0) + 1;
+                
+                if(d.status && d.status !== "error") {
+                    if(localPool[key]) { localPool[key].used = (localPool[key].used || 0) + 1; }
                     localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(localPool));
                 }
-            } catch(e) { document.getElementById('sandboxPre').innerText = "Exception: " + e.toString(); }
+            } catch(e) {
+                document.getElementById('sandboxPre').innerText = "Exception Logged: " + e.toString();
+            }
             fetchLogs();
             fetchState();
         }
@@ -506,15 +457,18 @@ HTML_DASHBOARD = """
             const blob = new Blob([csv], { type: 'text/csv' });
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
-            link.download = `Logs.csv`; link.click();
+            link.download = `Gateway_Streaming_Audit_Logs.csv`;
+            link.click();
         }
 
         function clearStreamingLogs() {
-            if(confirm("Flush logs?")) { fetch('/api/admin/logs', {method: 'POST'}).then(() => { fetchLogs(); }); }
+            if(confirm("Flush all logs memory?")) {
+                fetch('/api/admin/logs', {method: 'POST'}).then(() => { fetchLogs(); });
+            }
         }
 
         function clearAllSystemKeys() {
-            if(confirm("Wipe cache custom matrix registry?")) {
+            if(confirm("Wipe custom user local storage matrix?")) {
                 localStorage.removeItem('SHAYAN_BACKED_KEYS');
                 initLocalStorageBackup();
                 fetchState();
@@ -525,9 +479,10 @@ HTML_DASHBOARD = """
             e.preventDefault();
             const isGlobal = document.getElementById('allToolsCheck').checked;
             let selectedTools = ['all'];
+            
             if(!isGlobal) {
                 selectedTools = Array.from(document.querySelectorAll('.tool-chk:checked')).map(c => c.value);
-                if(selectedTools.length === 0) return alert("Select tool scope.");
+                if(selectedTools.length === 0) { return alert("Select at least one tool."); }
             }
 
             const payloadObject = {
@@ -549,17 +504,21 @@ HTML_DASHBOARD = """
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payloadObject)
             });
-            resetFormState(); fetchState();
+
+            resetFormState();
+            fetchState();
         });
 
         function triggerEdit(keyId) {
-            const k = localKeysCache[keyId]; if(!k) return;
-            document.getElementById('formTitle').innerHTML = `<i data-feather="edit" class="mr-2 w-4 h-4 text-blue-400"></i> Modify Active Profile`;
+            const k = localKeysCache[keyId];
+            if(!k) return;
+            document.getElementById('formTitle').innerHTML = `<i data-feather="edit" class="mr-2 w-4 h-4 text-blue-400"></i> Modify Active Token Profile`;
             document.getElementById('clientName').value = k.name;
             document.getElementById('apiKey').value = k.key;
             document.getElementById('apiKey').readOnly = true;
             document.getElementById('keyLimit').value = k.limit;
             document.getElementById('keyExpire').value = k.expire_date;
+            
             const isAll = k.tools.includes('all');
             document.getElementById('allToolsCheck').checked = isAll;
             toggleAllTools({checked: isAll});
@@ -585,6 +544,7 @@ HTML_DASHBOARD = """
             const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
             if(clientBackupPool[keyId]) clientBackupPool[keyId].status = newStatus;
             localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
+
             await fetch('/api/admin/keys/status', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -594,10 +554,11 @@ HTML_DASHBOARD = """
         }
 
         async function dropKey(keyId) {
-            if(confirm("Drop key signature code?")) {
+            if(confirm("Permanently wipe this routing token?")) {
                 const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
                 delete clientBackupPool[keyId];
                 localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
+
                 await fetch(`/api/admin/keys/delete/${keyId}`, { method: 'DELETE' });
                 fetchState();
             }
@@ -616,6 +577,7 @@ HTML_DASHBOARD = """
 def check_key_validity(api_key, tool_name):
     if api_key not in DB["keys"]:
         return False, "DEHYDRATED_KEY_DETECTED"
+        
     key_data = DB["keys"][api_key]
     if key_data.get("status", "Active") == "Suspended":
         return False, "This API access footprint has been explicitly suspended."
@@ -658,13 +620,6 @@ def sanitize_payload(data):
 def dashboard():
     return render_template_string(HTML_DASHBOARD)
 
-@app.route('/api/admin/settings/toggle', methods=['POST'])
-def toggle_setting():
-    data = request.json or {}
-    if "auto_reset" in data:
-        DB["settings"]["auto_reset"] = bool(data.get("auto_reset"))
-    return jsonify({"status": "success", "auto_reset": DB["settings"]["auto_reset"]})
-
 @app.route('/api/admin/keys', methods=['GET', 'POST'])
 def handle_keys():
     if request.method == 'POST':
@@ -684,16 +639,7 @@ def handle_keys():
         return jsonify({"status": "success"})
     return jsonify(list(DB["keys"].values()))
 
-# 🌟 AUTOMATIC BACKEND 10-SECOND LIMIT RESET ROUTE
-@app.route('/api/admin/keys/reset-loop', methods=['POST'])
-def loop_reset_keys():
-    if DB["settings"].get("auto_reset", True):
-        for key_id in DB["keys"]:
-            DB["keys"][key_id]["used"] = 0
-        return jsonify({"status": "success", "message": "All limits restart automatically via engine loop."})
-    return jsonify({"status": "ignored", "message": "Auto reset switch is disabled."})
-
-# 🛠️ MANUALLY RESTART LIMIT ROUTE
+# 🛠️ बैकएंड मैनुअल रिसेट एंडपॉइंट रूट
 @app.route('/api/admin/keys/manual-reset', methods=['POST'])
 def manual_reset_key():
     data = request.json or {}
@@ -707,9 +653,6 @@ def manual_reset_key():
 def sync_all_keys():
     data = request.json or {}
     received_keys = data.get('keys', [])
-    if "auto_reset" in data:
-        DB["settings"]["auto_reset"] = bool(data.get("auto_reset"))
-        
     for k in received_keys:
         key_id = k.get('key')
         if key_id:
@@ -719,7 +662,7 @@ def sync_all_keys():
                 DB["keys"][key_id]["name"] = k.get("name", DB["keys"][key_id]["name"])
                 DB["keys"][key_id]["limit"] = k.get("limit", DB["keys"][key_id]["limit"])
                 DB["keys"][key_id]["expire_date"] = k.get("expire_date", DB["keys"][key_id]["expire_date"])
-    return jsonify({"status": "success"})
+    return jsonify({"status": "success", "synced_count": len(received_keys)})
 
 @app.route('/api/admin/keys/status', methods=['POST'])
 def change_status():
@@ -729,7 +672,7 @@ def change_status():
     if key_id in DB["keys"]:
         DB["keys"][key_id]["status"] = new_status
         return jsonify({"status": "success"})
-    return jsonify({"status": "error"}), 404
+    return jsonify({"status": "error", "message": "Token not found"}), 404
 
 @app.route('/api/admin/keys/delete/<key_id>', methods=['DELETE'])
 def drop_key(key_id):
@@ -759,7 +702,7 @@ def proxy_gateway(tool):
         return jsonify({
             "status": "error",
             "developer": "SHAYAN_EXPLORER",
-            "message": "Gateway session synchronized. Please execute your network request again."
+            "message": "Gateway session synchronized. Please execute your network request again from the dashboard to auto-authenticate."
         }), 426
 
     if not is_valid:
