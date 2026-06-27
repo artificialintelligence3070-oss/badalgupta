@@ -256,6 +256,14 @@ HTML_DASHBOARD = """
             fetchState();
         }
 
+        // 🌟 ऐप जैसे ही मिनिमाइज़ से वापस स्क्रीन पर आए (टैब एक्टिव हो), तुरंत सर्वर पर कीज़ दोबारा पुश कर दो!
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                console.log("App brought back from background minimize state. Forcing auto-hydration handshake...");
+                syncClientToServerFallback();
+            }
+        });
+
         async function manuallyRestartKeyLimit(keyId) {
             const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
             if(clientBackupPool[keyId]) clientBackupPool[keyId].used = 0;
@@ -267,7 +275,6 @@ HTML_DASHBOARD = """
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ key: keyId })
                 });
-                alert(`API Key [${keyId}] limit restarted successfully.`);
             } catch(err) { console.error("Reset Request Failed: ", err); }
             fetchState();
         }
@@ -324,85 +331,88 @@ HTML_DASHBOARD = """
 
         function copyText(txt) {
             navigator.clipboard.writeText(txt);
-            alert("Endpoint string copied successfully.");
         }
 
         async function fetchState() {
-            const res = await fetch('/api/admin/keys');
-            const data = await res.json();
-            
-            const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
-            data.forEach(k => { clientBackupPool[k.key] = k; });
-            localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
-
-            const finalRenderPool = Object.values(clientBackupPool);
-            document.getElementById('statTotalKeys').innerText = finalRenderPool.length;
-
-            const table = document.getElementById('keysTable');
-            table.innerHTML = '';
-            localKeysCache = {};
-
-            finalRenderPool.forEach(k => {
-                localKeysCache[k.key] = k;
-                const isAll = k.tools.includes('all');
-                const badge = isAll ? 'GLOBAL' : `${k.tools.length} Tools`;
-                const isSuspended = k.status === 'Suspended';
-                const consumptionPercentage = Math.min(100, Math.round((k.used / k.limit) * 100) || 0);
+            try {
+                const res = await fetch('/api/admin/keys');
+                const data = await res.json();
                 
-                table.innerHTML += `
-                    <tr class="hover:bg-white/5 transition ${isSuspended ? 'opacity-30' : ''}">
-                        <td class="py-3 font-sans font-bold text-white pr-2">${k.name}</td>
-                        <td class="py-3 text-purple-400 font-bold text-[11px] pr-2">${k.key}</td>
-                        <td class="py-3 pr-2"><span class="px-2 py-0.5 rounded border text-[9px] font-bold ${isAll?'bg-emerald-500/10 text-emerald-400 border-emerald-500/20':'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}">${badge}</span></td>
-                        <td class="py-3 pr-2 w-32">
-                            <div class="text-[10px] text-gray-400 mb-1 flex justify-between"><span>${k.used}/${k.limit}</span> <span>${consumptionPercentage}%</span></div>
-                            <div class="w-full bg-white/10 h-1.5 rounded-full overflow-hidden">
-                                <div class="bg-gradient-to-r from-purple-500 to-indigo-500 h-full" style="width: ${consumptionPercentage}%"></div>
-                            </div>
-                        </td>
-                        <td class="py-3 text-gray-400 text-[11px] pr-2">${k.expire_date.replace('T', ' ')}</td>
-                        <td class="py-3 pr-2"><span class="text-[10px] font-bold ${isSuspended?'text-rose-400':'text-emerald-400'}">${k.status.toUpperCase()}</span></td>
-                        <td class="py-3 text-right space-x-1 whitespace-nowrap">
-                            <button onclick="manuallyRestartKeyLimit('${k.key}')" class="px-2 py-1 text-[10px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg hover:bg-amber-500/20 transition" title="Restart Limit Manually">Restart Limit</button>
-                            <button onclick="toggleSuspend('${k.key}', '${k.status}')" class="p-1.5 rounded hover:bg-white/5 text-amber-400 inline-block"><i data-feather="${isSuspended?'play':'square'}" class="w-3.5 h-3.5"></i></button>
-                            <button onclick="triggerEdit('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-blue-400 inline-block"><i data-feather="edit-3" class="w-3.5 h-3.5"></i></button>
-                            <button onclick="dropKey('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-rose-400 inline-block"><i data-feather="trash-2" class="w-3.5 h-3.5"></i></button>
-                        </td>
-                    </tr>`;
-            });
-            feather.replace();
+                const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
+                data.forEach(k => { clientBackupPool[k.key] = k; });
+                localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
+
+                const finalRenderPool = Object.values(clientBackupPool);
+                document.getElementById('statTotalKeys').innerText = finalRenderPool.length;
+
+                const table = document.getElementById('keysTable');
+                table.innerHTML = '';
+                localKeysCache = {};
+
+                finalRenderPool.forEach(k => {
+                    localKeysCache[k.key] = k;
+                    const isAll = k.tools.includes('all');
+                    const badge = isAll ? 'GLOBAL' : `${k.tools.length} Tools`;
+                    const isSuspended = k.status === 'Suspended';
+                    const consumptionPercentage = Math.min(100, Math.round((k.used / k.limit) * 100) || 0);
+                    
+                    table.innerHTML += `
+                        <tr class="hover:bg-white/5 transition ${isSuspended ? 'opacity-30' : ''}">
+                            <td class="py-3 font-sans font-bold text-white pr-2">${k.name}</td>
+                            <td class="py-3 text-purple-400 font-bold text-[11px] pr-2">${k.key}</td>
+                            <td class="py-3 pr-2"><span class="px-2 py-0.5 rounded border text-[9px] font-bold ${isAll?'bg-emerald-500/10 text-emerald-400 border-emerald-500/20':'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}">${badge}</span></td>
+                            <td class="py-3 pr-2 w-32">
+                                <div class="text-[10px] text-gray-400 mb-1 flex justify-between"><span>${k.used}/${k.limit}</span> <span>${consumptionPercentage}%</span></div>
+                                <div class="w-full bg-white/10 h-1.5 rounded-full overflow-hidden">
+                                    <div class="bg-gradient-to-r from-purple-500 to-indigo-500 h-full" style="width: ${consumptionPercentage}%"></div>
+                                </div>
+                            </td>
+                            <td class="py-3 text-gray-400 text-[11px] pr-2">${k.expire_date.replace('T', ' ')}</td>
+                            <td class="py-3 pr-2"><span class="text-[10px] font-bold ${isSuspended?'text-rose-400':'text-emerald-400'}">${k.status.toUpperCase()}</span></td>
+                            <td class="py-3 text-right space-x-1 whitespace-nowrap">
+                                <button onclick="manuallyRestartKeyLimit('${k.key}')" class="px-2 py-1 text-[10px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg hover:bg-amber-500/20 transition">Restart Limit</button>
+                                <button onclick="toggleSuspend('${k.key}', '${k.status}')" class="p-1.5 rounded hover:bg-white/5 text-amber-400 inline-block"><i data-feather="${isSuspended?'play':'square'}" class="w-3.5 h-3.5"></i></button>
+                                <button onclick="triggerEdit('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-blue-400 inline-block"><i data-feather="edit-3" class="w-3.5 h-3.5"></i></button>
+                                <button onclick="dropKey('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-rose-400 inline-block"><i data-feather="trash-2" class="w-3.5 h-3.5"></i></button>
+                            </td>
+                        </tr>`;
+                });
+                feather.replace();
+            } catch(e) { console.log("State sync delayed - awaiting link hydration."); }
         }
 
         async function fetchLogs() {
-            const res = await fetch('/api/admin/logs');
-            const data = await res.json();
-            const table = document.getElementById('logsTable');
-            
-            let successfulLogsCount = 0;
-            let failedLogsCount = 0;
-
-            if(data.length === 0) {
-                table.innerHTML = `<tr><td colspan="6" class="py-4 text-center text-gray-500 font-sans">Audit stream trace is currently empty.</td></tr>`;
-                return;
-            }
-
-            table.innerHTML = '';
-            data.forEach(l => {
-                if(l.status === "Success") successfulLogsCount++; else failedLogsCount++;
+            try {
+                const res = await fetch('/api/admin/logs');
+                const data = await res.json();
+                const table = document.getElementById('logsTable');
                 
-                table.innerHTML += `
-                    <tr class="hover:bg-white/5 transition log-row-item">
-                        <td class="py-2 text-gray-500 text-[11px]">${l.timestamp}</td>
-                        <td class="py-2 font-sans text-white">${l.key_name}</td>
-                        <td class="py-2 text-purple-400">${l.key}</td>
-                        <td class="py-2"><span class="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 rounded border border-blue-500/20 text-[10px] font-bold">${l.tool}</span></td>
-                        <td class="py-2 text-amber-300 max-w-[180px] truncate">${l.search}</td>
-                        <td class="py-2"><span class="text-emerald-400 font-bold">${l.status}</span></td>
-                    </tr>`;
-            });
-            
-            document.getElementById('statSuccess').innerText = successfulLogsCount;
-            document.getElementById('statFailed').innerText = failedLogsCount;
+                let successfulLogsCount = 0;
+                let failedLogsCount = 0;
+
+                if(data.length === 0) {
+                    table.innerHTML = `<tr><td colspan="6" class="py-4 text-center text-gray-500 font-sans">Audit stream trace is currently empty.</td></tr>`;
+                    return;
+                }
+
+                table.innerHTML = '';
+                data.forEach(l => {
+                    if(l.status === "Success") successfulLogsCount++; else failedLogsCount++;
+                    
+                    table.innerHTML += `
+                        <tr class="hover:bg-white/5 transition log-row-item">
+                            <td class="py-2 text-gray-500 text-[11px]">${l.timestamp}</td>
+                            <td class="py-2 font-sans text-white">${l.key_name}</td>
+                            <td class="py-2 text-purple-400">${l.key}</td>
+                            <td class="py-2"><span class="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 rounded border border-blue-500/20 text-[10px] font-bold">${l.tool}</span></td>
+                            <td class="py-2 text-amber-300 max-w-[180px] truncate">${l.search}</td>
+                            <td class="py-2"><span class="text-emerald-400 font-bold">${l.status}</span></td>
+                        </tr>`;
+                });
+                
+                document.getElementById('statSuccess').innerText = successfulLogsCount;
+                document.getElementById('statFailed').innerText = failedLogsCount;
+            } catch(e) { }
         }
 
         async function runSandboxTest() {
@@ -412,6 +422,8 @@ HTML_DASHBOARD = """
             if(!key || !param) return alert("Please fill up required inputs.");
             
             const localPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
+            
+            // 🌟 अगर सर्वर रीस्टार्ट होने की वजह से की (Key) सर्वर की रैम से डिलीट हो गई है, तो सैंडबॉक्स खुद पहले लोकल स्टोरेज वाली की सर्वर को दे देगा!
             if (localPool[key]) {
                 await fetch('/api/admin/keys', {
                     method: 'POST',
@@ -425,21 +437,20 @@ HTML_DASHBOARD = """
             document.getElementById('sandboxModal').classList.remove('hidden');
             
             try {
-                const r = await fetch(url);
+                let r = await fetch(url);
                 
-                // 🌟 अगर सैंडबॉक्स को 'DEHYDRATED' एरर मिलता है (426), तो यह तुरंत खुद को दोबारा सिंक करके फिर से फायर करेगा
+                // 🌟 डबल चेक: अगर फिर भी री-हाइड्रेशन फॉलबैक ट्रिगर होता है, तो तुरंत फुल सिंक करके दोबारा ऑटो-फायर करेगा!
                 if (r.status === 426) {
                     await syncClientToServerFallback();
-                    const retryRes = await fetch(url);
-                    const d = await retryRes.json();
-                    document.getElementById('sandboxPre').innerText = JSON.stringify(d, null, 4);
-                } else {
-                    const d = await r.json();
-                    document.getElementById('sandboxPre').innerText = JSON.stringify(d, null, 4);
-                    if(d.status && d.status !== "error") {
-                        if(localPool[key]) { localPool[key].used = (localPool[key].used || 0) + 1; }
-                        localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(localPool));
-                    }
+                    r = await fetch(url);
+                }
+                
+                const d = await r.json();
+                document.getElementById('sandboxPre').innerText = JSON.stringify(d, null, 4);
+                
+                if(d.status && d.status !== "error") {
+                    if(localPool[key]) { localPool[key].used = (localPool[key].used || 0) + 1; }
+                    localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(localPool));
                 }
             } catch(e) {
                 document.getElementById('sandboxPre').innerText = "Exception Logged: " + e.toString();
@@ -574,7 +585,7 @@ HTML_DASHBOARD = """
         initLocalStorageBackup();
         initToolsCheckboxes();
         syncClientToServerFallback();
-        setInterval(fetchLogs, 3000);
+        setInterval(fetchLogs, 5000);
         setTimeout(() => { feather.replace(); }, 500);
     </script>
 </body>
@@ -704,7 +715,7 @@ def proxy_gateway(tool):
     
     is_valid, result = check_key_validity(user_key, tool)
     
-    # 🌟 यहाँ बग फिक्स किया गया है: अगर रिक्वेस्ट आई और की (Key) मेमोरी में नहीं है, तो तुरंत 426 रिस्पांस भेजेगा ताकि फ्रंटएंड बैकएंड डेटा ऑटो-सिंक कर ले
+    # 🌟 ऑटो-सिंक हुक: अगर की गायब भी हो गई है तो क्लाइंट को एरर दिखाने के बजाय सीधे 426 रिस्पांस भेजेगा और फ्रंटएंड बैकग्राउंड में तुरंत री-हाइड्रेट कर लेगा
     if not is_valid and result == "DEHYDRATED_KEY_DETECTED":
         return jsonify({
             "status": "error",
