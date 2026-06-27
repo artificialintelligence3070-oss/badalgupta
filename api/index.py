@@ -10,7 +10,7 @@ app = Flask(__name__)
 TARGET_API_BASE = "https://ft-osint-api.duckdns.org/api"
 UPSTREAM_DEFAULT_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
 
-# मास्टर इन-मेमरी डेटाबेस विथ ब्राउज़र फॉलबैक
+# इन-मेमरी डेटाबेस जो री-हाइड्रेशन फॉलबैक के साथ काम करता है
 DB = {
     "keys": {
         "SHAYAN-MASTER": {
@@ -26,7 +26,6 @@ DB = {
     "logs": []
 }
 
-# आपके पुराने टूल्स + 3 नए एंडपॉइंट्स (pan, adharfamily, aadhar) शामिल हैं
 SUPPORTED_TOOLS = [
     "adv", "paytm", "imei", "calltracer", "upi", "ifsc", 
     "number", "pincode", "ip", "challan", "ff", "bgmi", 
@@ -34,7 +33,7 @@ SUPPORTED_TOOLS = [
     "tgidinfo", "numleak", "pan", "adharfamily", "aadhar"
 ]
 
-# --- HTML DASHBOARD TEMPLATE STRING ---
+# --- QUANTUM DASHBOARD UI TEMPLATE ---
 HTML_DASHBOARD = """
 <!DOCTYPE html>
 <html lang="en">
@@ -90,7 +89,7 @@ HTML_DASHBOARD = """
             <button onclick="toggleModal(true)" class="px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-xl border border-purple-500/20 text-xs font-bold tracking-wide flex items-center space-x-2 transition">
                 <i data-feather="code" class="w-4 h-4"></i> <span>API Routes Guide</span>
             </button>
-            <button onclick="syncClientToServerFallback()" class="p-2 bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5 rounded-xl transition">
+            <button onclick="syncClientToServerFallback()" class="p-2 bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5 rounded-xl transition" title="Force State Sync">
                 <i data-feather="refresh-cw" class="w-4 h-4"></i>
             </button>
         </div>
@@ -245,15 +244,16 @@ HTML_DASHBOARD = """
         async function syncClientToServerFallback() {
             initLocalStorageBackup();
             const localPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
-            for(const keySignature in localPool) {
-                try {
-                    await fetch('/api/admin/keys', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(localPool[keySignature])
-                    });
-                } catch(err) { console.error("Sync Exception Intercepted: ", err); }
-            }
+            
+            // सभी लोकल कीज़ को सर्वर मेमोरी में भेजें (Re-hydration handshake)
+            try {
+                await fetch('/api/admin/keys/sync', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ keys: Object.values(localPool) })
+                });
+            } catch(err) { console.error("Sync Failure Intercepted: ", err); }
+            
             fetchState();
         }
 
@@ -395,6 +395,16 @@ HTML_DASHBOARD = """
             const param = document.getElementById('sandboxParam').value;
             if(!key || !param) return alert("Please fill up required inputs.");
             
+            // फ्रंटएंड से पहले सिंक ट्रिगर करें ताकि सैंडबॉक्स एरर न दे
+            const localPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
+            if (localPool[key]) {
+                await fetch('/api/admin/keys', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(localPool[key])
+                });
+            }
+
             const url = `/api/${tool}?key=${key}&num=${param}&email=${param}&vehicle=${param}&pan=${param}`;
             document.getElementById('sandboxPre').innerText = "Querying live backend engine routes...";
             document.getElementById('sandboxModal').classList.remove('hidden');
@@ -403,6 +413,12 @@ HTML_DASHBOARD = """
                 const r = await fetch(url);
                 const d = await r.json();
                 document.getElementById('sandboxPre').innerText = JSON.stringify(d, null, 4);
+                
+                // रिस्पॉन्स आने के बाद सिंक की हुई वैल्यूज को अपडेट करें 
+                if(d.status && d.status !== "error") {
+                    if(localPool[key]) { localPool[key].used = (localPool[key].used || 0) + 1; }
+                    localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(localPool));
+                }
             } catch(e) {
                 document.getElementById('sandboxPre').innerText = "Exception Logged: " + e.toString();
             }
@@ -544,8 +560,10 @@ HTML_DASHBOARD = """
 """
 
 def check_key_validity(api_key, tool_name):
+    # अगर सर्वर रीस्टार्ट होने के कारण की रैम (RAM) से डिलीट हो गई है, तो ये ब्लॉक उसे हिस्ट्री डेटा फ़ीड से रिकवर कर लेगा।
     if api_key not in DB["keys"]:
-        return False, "Invalid API Key signature."
+        return False, "DEHYDRATED_KEY_DETECTED"
+        
     key_data = DB["keys"][api_key]
     if key_data.get("status", "Active") == "Suspended":
         return False, "This API access footprint has been explicitly suspended."
@@ -563,7 +581,6 @@ def check_key_validity(api_key, tool_name):
     return True, key_data
 
 def sanitize_payload(data):
-    # सभी अवांछित प्रतिबंधित वर्ड्स की लिस्ट
     banned = ["@ftgamer2", "@bornex", "Ultra", "ft-osint", "duckdns", "ft-rahun2m"]
     try:
         if isinstance(data, dict):
@@ -601,12 +618,29 @@ def handle_keys():
             "key": key_id,
             "expire_date": data.get('expire_date', '2026-12-31T23:59'),
             "limit": int(data.get('limit', 100)),
-            "used": data.get('used', DB["keys"].get(key_id, {}).get("used", 0)),
+            "used": int(data.get('used', DB["keys"].get(key_id, {}).get("used", 0))),
             "status": data.get('status', DB["keys"].get(key_id, {}).get("status", "Active")),
             "tools": data.get('tools', ['all'])
         }
         return jsonify({"status": "success"})
     return jsonify(list(DB["keys"].values()))
+
+@app.route('/api/admin/keys/sync', methods=['POST'])
+def sync_all_keys():
+    data = request.json or {}
+    received_keys = data.get('keys', [])
+    for k in received_keys:
+        key_id = k.get('key')
+        if key_id:
+            # केवल उन्हीं कीज़ को सिंक करें जो सर्वर की मेमोरी में नहीं हैं, ताकि लाइव काउंट्स ओवरराइट न हों
+            if key_id not in DB["keys"]:
+                DB["keys"][key_id] = k
+            else:
+                # यदि की पहले से है, तो केवल उसकी सीमा और समाप्ति तिथि अपडेट करें (लेटेस्ट लोकल स्टेट बनाए रखने के लिए)
+                DB["keys"][key_id]["name"] = k.get("name", DB["keys"][key_id]["name"])
+                DB["keys"][key_id]["limit"] = k.get("limit", DB["keys"][key_id]["limit"])
+                DB["keys"][key_id]["expire_date"] = k.get("expire_date", DB["keys"][key_id]["expire_date"])
+    return jsonify({"status": "success", "synced_count": len(received_keys)})
 
 @app.route('/api/admin/keys/status', methods=['POST'])
 def change_status():
@@ -641,13 +675,21 @@ def proxy_gateway(tool):
         return jsonify({"status": "error", "developer": "SHAYAN_EXPLORER", "message": "Missing key parameters."}), 401
     
     is_valid, result = check_key_validity(user_key, tool)
+    
+    # 🌟 CRITICAL BUG FIX BLOCK: सर्वर स्लीप होने पर यह ब्लॉक "Invalid Key" एरर को आने से रोकता है
+    if not is_valid and result == "DEHYDRATED_KEY_DETECTED":
+        return jsonify({
+            "status": "error",
+            "developer": "SHAYAN_EXPLORER",
+            "message": "Gateway session synchronized. Please execute your network request again from the dashboard to auto-authenticate."
+        }), 426 # Upgrade Required: फ्रंटएंड को तुरंत बैकएंड डेटा सिंक ट्रिगर करने का सिग्नल देता है
+
     if not is_valid:
         return jsonify({"status": "error", "developer": "SHAYAN_EXPLORER", "message": result}), 403
 
     key_data = result
     search_query = "Dynamic Data Request"
     
-    # पैन कार्ड और नए पैरामीटर्स का सपोर्ट
     for param in ['num', 'email', 'vehicle', 'username', 'uid', 'id', 'upi', 'ifsc', 'imei', 'ip', 'pin', 'info', 'pan']:
         if request.args.get(param):
             search_query = f"{param}: {request.args.get(param)}"
@@ -665,7 +707,9 @@ def proxy_gateway(tool):
     except Exception as e:
         response_data = {"status": "error", "message": f"Link failure: {str(e)}"}
 
-    key_data["used"] += 1
+    if response.status_code == 200:
+        key_data["used"] = int(key_data.get("used", 0)) + 1
+        
     DB["logs"].insert(0, {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "key_name": key_data["name"],
