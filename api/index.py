@@ -256,7 +256,6 @@ HTML_DASHBOARD = """
             fetchState();
         }
 
-        // 🛠️ मैन्युअली सिंगल की (Key) की लिमिट को रीस्टार्ट करने का फ्रंटएंड फ़ंक्शन
         async function manuallyRestartKeyLimit(keyId) {
             const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
             if(clientBackupPool[keyId]) clientBackupPool[keyId].used = 0;
@@ -427,12 +426,20 @@ HTML_DASHBOARD = """
             
             try {
                 const r = await fetch(url);
-                const d = await r.json();
-                document.getElementById('sandboxPre').innerText = JSON.stringify(d, null, 4);
                 
-                if(d.status && d.status !== "error") {
-                    if(localPool[key]) { localPool[key].used = (localPool[key].used || 0) + 1; }
-                    localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(localPool));
+                // 🌟 अगर सैंडबॉक्स को 'DEHYDRATED' एरर मिलता है (426), तो यह तुरंत खुद को दोबारा सिंक करके फिर से फायर करेगा
+                if (r.status === 426) {
+                    await syncClientToServerFallback();
+                    const retryRes = await fetch(url);
+                    const d = await retryRes.json();
+                    document.getElementById('sandboxPre').innerText = JSON.stringify(d, null, 4);
+                } else {
+                    const d = await r.json();
+                    document.getElementById('sandboxPre').innerText = JSON.stringify(d, null, 4);
+                    if(d.status && d.status !== "error") {
+                        if(localPool[key]) { localPool[key].used = (localPool[key].used || 0) + 1; }
+                        localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(localPool));
+                    }
                 }
             } catch(e) {
                 document.getElementById('sandboxPre').innerText = "Exception Logged: " + e.toString();
@@ -639,7 +646,6 @@ def handle_keys():
         return jsonify({"status": "success"})
     return jsonify(list(DB["keys"].values()))
 
-# 🛠️ बैकएंड मैनुअल रिसेट एंडपॉइंट रूट
 @app.route('/api/admin/keys/manual-reset', methods=['POST'])
 def manual_reset_key():
     data = request.json or {}
@@ -698,6 +704,7 @@ def proxy_gateway(tool):
     
     is_valid, result = check_key_validity(user_key, tool)
     
+    # 🌟 यहाँ बग फिक्स किया गया है: अगर रिक्वेस्ट आई और की (Key) मेमोरी में नहीं है, तो तुरंत 426 रिस्पांस भेजेगा ताकि फ्रंटएंड बैकएंड डेटा ऑटो-सिंक कर ले
     if not is_valid and result == "DEHYDRATED_KEY_DETECTED":
         return jsonify({
             "status": "error",
