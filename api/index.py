@@ -11,7 +11,7 @@ TARGET_API_BASE = "https://ft-osint-api.duckdns.org/api"
 UPSTREAM_DEFAULT_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
 TELEGRAM_CHANNEL_LINK = "https://t.me/shayan_explorer_channel"
 
-# परसिस्टेंट इन-मेमरी रजिस्ट्री
+# परसिस्टेंट इन-मेमरी रजिस्ट्री - री-हाइड्रेशन फॉलबैक के साथ सुरक्षित
 DB = {
     "keys": {
         "SHAYAN-MASTER": {
@@ -334,7 +334,7 @@ HTML_DASHBOARD = """
 
             finalRenderPool.forEach(k => {
                 localKeysCache[k.key] = k;
-                const isAll = k.tools.includes('all');
+                const isAll = !k.tools || k.tools.length === 0 || k.tools.includes('all');
                 const badge = isAll ? 'GLOBAL' : `${k.tools.length} Tools`;
                 const isSuspended = k.status === 'Suspended';
                 const consumptionPercentage = Math.min(100, Math.round((k.used / k.limit) * 100) || 0);
@@ -499,6 +499,7 @@ HTML_DASHBOARD = """
                 status: localKeysCache[document.getElementById('apiKey').value]?.status || "Active"
             };
 
+            // इमीडिएट ब्राउज़र कमिट ताकि कोई री-हाइड्रेशन लैग न बचे
             const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
             clientBackupPool[payloadObject.key] = payloadObject;
             localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
@@ -523,10 +524,10 @@ HTML_DASHBOARD = """
             document.getElementById('keyLimit').value = k.limit;
             document.getElementById('keyExpire').value = k.expire_date;
             
-            const isAll = k.tools.includes('all');
+            const isAll = !k.tools || k.tools.length === 0 || k.tools.includes('all');
             document.getElementById('allToolsCheck').checked = isAll;
             toggleAllTools({checked: isAll});
-            document.querySelectorAll('.tool-chk').forEach(chk => { chk.checked = !isAll && k.tools.includes(chk.value); });
+            document.querySelectorAll('.tool-chk').forEach(chk => { chk.checked = !isAll && k.tools && k.tools.includes(chk.value); });
             document.getElementById('cancelEditBtn').classList.remove('hidden');
             document.getElementById('submitBtn').innerText = "SAVE MODIFICATIONS";
             feather.replace();
@@ -596,9 +597,11 @@ def check_key_validity(api_key, tool_name):
         return False, f"The API limit is finished. If you want to buy more API access, please purchase from our official channel: {TELEGRAM_CHANNEL_LINK}"
         
     allowed_tools = key_data.get("tools", [])
-    # स्कोप चेक फ़िक्स: अगर लिस्ट में 'all' है तो हमेशा True, वर्ना इंडिविजुअल टूल चेक
-    if "all" in allowed_tools:
+    
+    # बुलेटप्रूफ फॉलबैक: अगर एरे गायब है, खाली है, या 'all' शामिल है तो सीधा ग्लोबल परमिशन ग्रांट करें
+    if not allowed_tools or len(allowed_tools) == 0 or "all" in allowed_tools:
         return True, key_data
+        
     if tool_name not in allowed_tools:
         return False, f"Access denied for router parameter: '{tool_name}'."
     return True, key_data
@@ -637,7 +640,6 @@ def handle_keys():
         if not key_id:
             return jsonify({"status": "error", "message": "Key code is mandatory"}), 400
         
-        # सुनिश्चित करें कि टूल्स एरे हमेशा सही फॉर्मेट में हो
         tools_payload = data.get('tools', ['all'])
         if not tools_payload or len(tools_payload) == 0:
             tools_payload = ['all']
