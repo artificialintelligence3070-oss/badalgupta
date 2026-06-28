@@ -11,7 +11,7 @@ TARGET_API_BASE = "https://ft-osint-api.duckdns.org/api"
 UPSTREAM_DEFAULT_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
 TELEGRAM_CHANNEL_LINK = "https://t.me/shayan_explorer_channel"
 
-# इन-मेमरी डेटाबेस जो री-हाइड्रेशन फॉलबैक के साथ काम करता है
+# परसिस्टेंट इन-मेमरी रजिस्ट्री
 DB = {
     "keys": {
         "SHAYAN-MASTER": {
@@ -27,7 +27,7 @@ DB = {
     "logs": []
 }
 
-# पूरे 28 APIs की लिस्ट
+# सभी 28 वैलिडेटेड टूल्स की मास्टर लिस्ट
 SUPPORTED_TOOLS = [
     "adv", "paytm", "imei", "calltracer", "upi", "ifsc", 
     "number", "pincode", "ip", "challan", "ff", "bgmi", 
@@ -366,9 +366,7 @@ HTML_DASHBOARD = """
         async function restartQuota(keyId) {
             if(confirm("Are you sure you want to restart/reset the request limit for this key?")) {
                 const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
-                if(clientBackupPool[keyId]) {
-                    clientBackupPool[keyId].used = 0;
-                }
+                if(clientBackupPool[keyId]) { clientBackupPool[keyId].used = 0; }
                 localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
 
                 await fetch('/api/admin/keys/restart', {
@@ -594,12 +592,14 @@ def check_key_validity(api_key, tool_name):
     except Exception:
         return False, "System runtime token configuration parse exception."
         
-    # लिमिट ख़त्म होने की कंडीशन और कस्टम टेलीग्राम चैनल मैसेज का इंटीग्रेशन
     if int(key_data["used"]) >= int(key_data["limit"]):
         return False, f"The API limit is finished. If you want to buy more API access, please purchase from our official channel: {TELEGRAM_CHANNEL_LINK}"
         
     allowed_tools = key_data.get("tools", [])
-    if "all" not in allowed_tools and tool_name not in allowed_tools:
+    # स्कोप चेक फ़िक्स: अगर लिस्ट में 'all' है तो हमेशा True, वर्ना इंडिविजुअल टूल चेक
+    if "all" in allowed_tools:
+        return True, key_data
+    if tool_name not in allowed_tools:
         return False, f"Access denied for router parameter: '{tool_name}'."
     return True, key_data
 
@@ -636,6 +636,12 @@ def handle_keys():
         key_id = data.get('key')
         if not key_id:
             return jsonify({"status": "error", "message": "Key code is mandatory"}), 400
+        
+        # सुनिश्चित करें कि टूल्स एरे हमेशा सही फॉर्मेट में हो
+        tools_payload = data.get('tools', ['all'])
+        if not tools_payload or len(tools_payload) == 0:
+            tools_payload = ['all']
+
         DB["keys"][key_id] = {
             "name": data.get('name', 'Client Target Profile'),
             "key": key_id,
@@ -643,12 +649,11 @@ def handle_keys():
             "limit": int(data.get('limit', 100)),
             "used": int(data.get('used', DB["keys"].get(key_id, {}).get("used", 0))),
             "status": data.get('status', DB["keys"].get(key_id, {}).get("status", "Active")),
-            "tools": data.get('tools', ['all'])
+            "tools": tools_payload
         }
         return jsonify({"status": "success"})
     return jsonify(list(DB["keys"].values()))
 
-# लिमिट रिस्टार्ट (Reset) करने का बैकएंड एंडपॉइंट
 @app.route('/api/admin/keys/restart', methods=['POST'])
 def restart_key_limit():
     data = request.json or {}
@@ -665,14 +670,20 @@ def sync_all_keys():
     for k in received_keys:
         key_id = k.get('key')
         if key_id:
+            tools_payload = k.get("tools", ["all"])
+            if not tools_payload or len(tools_payload) == 0:
+                tools_payload = ["all"]
+                
             if key_id not in DB["keys"]:
                 DB["keys"][key_id] = k
+                DB["keys"][key_id]["tools"] = tools_payload
             else:
                 DB["keys"][key_id]["name"] = k.get("name", DB["keys"][key_id]["name"])
                 DB["keys"][key_id]["limit"] = k.get("limit", DB["keys"][key_id]["limit"])
                 DB["keys"][key_id]["expire_date"] = k.get("expire_date", DB["keys"][key_id]["expire_date"])
                 DB["keys"][key_id]["used"] = k.get("used", DB["keys"][key_id]["used"])
                 DB["keys"][key_id]["status"] = k.get("status", DB["keys"][key_id]["status"])
+                DB["keys"][key_id]["tools"] = tools_payload
     return jsonify({"status": "success", "synced_count": len(received_keys)})
 
 @app.route('/api/admin/keys/status', methods=['POST'])
