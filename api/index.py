@@ -1,7 +1,8 @@
 import os
+import json
 import secrets
 import requests
-from flask import Flask, request, jsonify, render_template_string
+from Flask import Flask, request, jsonify, render_template_string
 from datetime import datetime
 from dateutil import parser
 
@@ -10,28 +11,48 @@ app = Flask(__name__)
 TARGET_API_BASE = "https://ft-osint-api.duckdns.org/api"
 UPSTREAM_DEFAULT_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
 
-# इन-मेमरी डेटाबेस जो री-हाइड्रेशन फॉलबैक के साथ काम करता है
-# NOTE: यह हर सर्वर रीस्टार्ट पर रीसेट हो जाएगा - इसलिए client-side localStorage बैकअप ज़रूरी है
-DB = {
-    "keys": {
-        "SHAYAN-MASTER": {
-            "name": "Master Enterprise Dev",
-            "key": "SHAYAN-MASTER",
-            "expire_date": "2026-12-31T23:59",
-            "limit": 1000,
-            "used": 0,
-            "status": "Active",
-            "tools": ["all"]
-        }
-    },
-    "logs": []
-}
+# --- FILE DATABASE SYSTEM (PERMANENT STORAGE) ---
+DB_FILE = "keys_db.json"
 
+def load_db():
+    if not os.path.exists(DB_FILE):
+        default_db = {
+            "keys": {
+                "SHAYAN-MASTER": {
+                    "name": "Master Enterprise Dev",
+                    "key": "SHAYAN-MASTER",
+                    "expire_date": "2026-12-31T23:59",
+                    "limit": 1000,
+                    "used": 0,
+                    "status": "Active",
+                    "tools": ["all"]
+                }
+            },
+            "logs": []
+        }
+        with open(DB_FILE, 'w') as f:
+            json.dump(default_db, f, indent=4)
+        return default_db
+    try:
+        with open(DB_FILE, 'r') as f:
+            return json.load(f)
+    except Exception:
+        return {"keys": {}, "logs": []}
+
+def save_db(data):
+    try:
+        with open(DB_FILE, 'w') as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        print(f"Error saving database file: {str(e)}")
+
+# नए टूल्स (veh2num, bomber, pk) को सपोर्टेड लिस्ट में जोड़ दिया गया है
 SUPPORTED_TOOLS = [
     "adv", "paytm", "imei", "calltracer", "upi", "ifsc", 
     "number", "pincode", "ip", "challan", "ff", "bgmi", 
     "snap", "email", "vehicle", "git", "insta", "tg", 
-    "tgidinfo", "numleak", "pan", "adharfamily", "aadhar"
+    "tgidinfo", "numleak", "pan", "adharfamily", "aadhar",
+    "numtoupi", "veh2num", "bomber", "pk"
 ]
 
 # --- QUANTUM DASHBOARD UI TEMPLATE ---
@@ -51,42 +72,28 @@ HTML_DASHBOARD = """
         ::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
         ::-webkit-scrollbar-thumb { background: rgba(147, 51, 234, 0.3); border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: rgba(147, 51, 234, 0.6); }
-        .pulse-dot { animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite; }
-        @keyframes pulse-ring {
-            0% { transform: scale(0.33); opacity: 1; }
-            80%, 100% { transform: scale(2); opacity: 0; }
-        }
-        .toast-enter { animation: slideIn 0.3s ease-out forwards; }
-        @keyframes slideIn {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
     </style>
 </head>
 <body class="min-h-screen antialiased font-sans pb-12">
 
-    <!-- Toast Container -->
-    <div id="toastContainer" class="fixed top-20 right-4 z-50 space-y-2"></div>
-
     <header class="border-b border-white/5 py-4 px-6 flex flex-wrap justify-between items-center bg-black/40 backdrop-blur-md sticky top-0 z-40 gap-4">
         <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-purple-500/20 relative">
-                <div class="absolute inset-0 rounded-xl bg-purple-500/20 pulse-dot"></div>
-                <i data-feather="activity" class="w-5 h-5 text-white relative z-10"></i>
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-purple-500/20">
+                <i data-feather="activity" class="w-5 h-5 text-white"></i>
             </div>
             <div>
                 <span class="text-lg font-black tracking-wider text-white block">SHAYAN_EXPLORER</span>
                 <div class="flex items-center space-x-1.5">
-                    <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-ping"></span>
                     <span class="text-[10px] text-emerald-400 font-bold uppercase tracking-widest">Gateway Engine Operational</span>
                 </div>
             </div>
         </div>
-
+        
         <div class="flex items-center space-x-6 bg-black/30 px-4 py-1.5 rounded-xl border border-white/5 text-xs">
             <div class="text-center">
                 <span class="text-gray-400 block text-[9px] uppercase font-bold">Total Key Registry</span>
-                <span id="statTotalKeys" class="font-mono text-purple-400 font-bold">1</span>
+                <span id="statTotalKeys" class="font-mono text-purple-400 font-bold">0</span>
             </div>
             <div class="w-px h-6 bg-white/10"></div>
             <div class="text-center">
@@ -104,15 +111,15 @@ HTML_DASHBOARD = """
             <button onclick="toggleModal(true)" class="px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-xl border border-purple-500/20 text-xs font-bold tracking-wide flex items-center space-x-2 transition">
                 <i data-feather="code" class="w-4 h-4"></i> <span>API Routes Guide</span>
             </button>
-            <button onclick="forceFullHydration()" class="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/20 rounded-xl text-xs font-bold transition flex items-center space-x-2" title="Force Re-Hydrate All Keys">
-                <i data-feather="refresh-cw" class="w-4 h-4" id="syncIcon"></i> <span>Sync Keys</span>
+            <button onclick="fetchState()" class="p-2 bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5 rounded-xl transition" title="Refresh State">
+                <i data-feather="refresh-cw" class="w-4 h-4"></i>
             </button>
         </div>
     </header>
 
     <main class="max-w-7xl mx-auto p-4 md:p-6 space-y-6 mt-2">
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
+            
             <div class="lg:col-span-1 space-y-6">
                 <div class="glass rounded-2xl p-6 flex flex-col space-y-4 shadow-xl">
                     <div class="flex justify-between items-center border-b border-white/5 pb-2">
@@ -123,7 +130,7 @@ HTML_DASHBOARD = """
                             <i data-feather="key" class="w-3 h-3"></i> <span>Auto Generate Key</span>
                         </button>
                     </div>
-
+                    
                     <form id="keyForm" class="space-y-4">
                         <div>
                             <label class="block text-[10px] uppercase text-gray-400 font-bold mb-1">User Identifier Profile</label>
@@ -163,7 +170,7 @@ HTML_DASHBOARD = """
                     <div class="space-y-2 text-xs">
                         <select id="sandboxTool" class="w-full bg-black/40 border border-white/10 rounded-xl p-2 text-gray-300 focus:outline-none focus:border-indigo-500"></select>
                         <input type="text" id="sandboxKey" placeholder="Enter Valid API Key Token" class="w-full bg-black/40 border border-white/10 rounded-xl p-2 font-mono text-purple-300">
-                        <input type="text" id="sandboxParam" placeholder="Value (e.g. Mobile, PAN, UID)" class="w-full bg-black/40 border border-white/10 rounded-xl p-2">
+                        <input type="text" id="sandboxParam" placeholder="Value (e.g. MH02, KL41, 987654...)" class="w-full bg-black/40 border border-white/10 rounded-xl p-2">
                         <button onclick="runSandboxTest()" class="w-full py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition text-[11px]">FIRE SANDBOX DATA ROUTE</button>
                     </div>
                 </div>
@@ -171,10 +178,9 @@ HTML_DASHBOARD = """
 
             <div class="lg:col-span-2 glass rounded-2xl p-6 flex flex-col max-h-[640px] shadow-xl">
                 <div class="flex flex-wrap justify-between items-center mb-4 gap-2">
-                    <h2 class="text-xs font-black uppercase tracking-wider text-indigo-400 flex items-center"><i data-feather="shield" class="w-4 h-4 mr-2"></i> Runtime System Database Matrix</h2>
-                    <button onclick="clearAllSystemKeys()" class="text-[10px] bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 px-2 py-1 rounded-lg font-bold transition">Wipe Custom Registry</button>
+                    <h2 class="text-xs font-black uppercase tracking-wider text-indigo-400 flex items-center"><i data-feather="shield" class="w-4 h-4 mr-2"></i> Runtime Permanent Database Matrix</h2>
                 </div>
-
+                
                 <div class="overflow-x-auto flex-1 overflow-y-auto">
                     <table class="w-full text-left text-xs border-collapse">
                         <thead class="sticky top-0 bg-[#120b24] z-10 text-gray-400 font-bold uppercase tracking-wider border-b border-white/5">
@@ -203,7 +209,7 @@ HTML_DASHBOARD = """
                     <button onclick="clearStreamingLogs()" class="bg-rose-600/10 hover:bg-rose-600/20 text-rose-400 border border-rose-500/20 px-2 py-1 rounded-lg font-bold text-[10px] transition">Wipe Log Stream</button>
                 </div>
             </div>
-
+            
             <div class="overflow-x-auto max-h-64 overflow-y-auto">
                 <table id="mainLogsTable" class="w-full text-left text-xs border-collapse">
                     <thead class="sticky top-0 bg-[#0d071a] border-b border-white/10 text-gray-400 font-bold uppercase">
@@ -244,123 +250,8 @@ HTML_DASHBOARD = """
     </div>
 
     <script>
-        const toolsList = ["adv","paytm","imei","calltracer","upi","ifsc","number","pincode","ip","challan","ff","bgmi","snap","email","vehicle","git","insta","tg","tgidinfo","numleak","pan","adharfamily","aadhar"];
-        const STORAGE_KEY = 'SHAYAN_BACKED_KEYS_V2';  // V2 for clean migration
+        const toolsList = ["adv","paytm","imei","calltracer","upi","ifsc","number","pincode","ip","challan","ff","bgmi","snap","email","vehicle","git","insta","tg","tgidinfo","numleak","pan","adharfamily","aadhar","numtoupi","veh2num","bomber","pk"];
         let localKeysCache = {};
-        let hydrationInProgress = false;
-
-        function showToast(message, type = 'info') {
-            const container = document.getElementById('toastContainer');
-            const toast = document.createElement('div');
-            const colors = {
-                success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400',
-                error: 'border-rose-500/30 bg-rose-500/10 text-rose-400',
-                info: 'border-blue-500/30 bg-blue-500/10 text-blue-400',
-                warning: 'border-amber-500/30 bg-amber-500/10 text-amber-400'
-            };
-            toast.className = `toast-enter px-4 py-3 rounded-xl border backdrop-blur-md text-xs font-bold shadow-lg ${colors[type] || colors.info} flex items-center space-x-2`;
-            toast.innerHTML = `<i data-feather="${type === 'success' ? 'check-circle' : type === 'error' ? 'alert-circle' : 'info'}" class="w-4 h-4"></i><span>${message}</span>`;
-            container.appendChild(toast);
-            feather.replace();
-            setTimeout(() => {
-                toast.style.opacity = '0';
-                toast.style.transform = 'translateX(100%)';
-                toast.style.transition = 'all 0.3s ease';
-                setTimeout(() => toast.remove(), 300);
-            }, 4000);
-        }
-
-        function initLocalStorageBackup() {
-            if(!localStorage.getItem(STORAGE_KEY)) {
-                const defaultPool = {
-                    "SHAYAN-MASTER": { "name": "Master Enterprise Dev", "key": "SHAYAN-MASTER", "expire_date": "2026-12-31T23:59", "limit": 1000, "used": 0, "status": "Active", "tools": ["all"] }
-                };
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultPool));
-            }
-        }
-
-        // 🌟 CRITICAL FIX: Full hydration that pushes ALL local keys to server
-        async function forceFullHydration() {
-            if (hydrationInProgress) return;
-            hydrationInProgress = true;
-
-            const icon = document.getElementById('syncIcon');
-            icon.classList.add('animate-spin');
-
-            try {
-                const localPool = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-                const keysArray = Object.values(localPool);
-
-                if (keysArray.length === 0) {
-                    showToast("No keys in local storage to sync", "warning");
-                    return;
-                }
-
-                // Step 1: Bulk sync all keys
-                const syncRes = await fetch('/api/admin/keys/sync', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ keys: keysArray })
-                });
-
-                if (!syncRes.ok) throw new Error("Sync failed");
-
-                // Step 2: Verify by fetching state
-                await fetchState();
-
-                showToast(`Successfully hydrated ${keysArray.length} key(s) to server`, "success");
-            } catch(err) { 
-                console.error("Hydration Failure:", err);
-                showToast("Sync failed. Server may be restarting.", "error");
-            } finally {
-                hydrationInProgress = false;
-                icon.classList.remove('animate-spin');
-            }
-        }
-
-        // 🌟 Auto-hydrate when tab becomes visible (server likely slept)
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') {
-                console.log("Tab visible. Checking server hydration...");
-                // Check if server has our keys, if not, hydrate
-                fetchState().then(() => {
-                    const localPool = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-                    const localKeys = Object.keys(localPool);
-                    const serverKeys = Object.keys(localKeysCache);
-
-                    // If server has fewer keys than local, re-hydrate
-                    if (serverKeys.length < localKeys.length) {
-                        console.log("Key mismatch detected. Re-hydrating...");
-                        forceFullHydration();
-                    }
-                });
-            }
-        });
-
-        // 🌟 Periodic background sync every 2 minutes to prevent data loss
-        setInterval(() => {
-            if (!document.hidden) {
-                forceFullHydration();
-            }
-        }, 120000);
-
-        async function manuallyRestartKeyLimit(keyId) {
-            const clientBackupPool = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-            if(clientBackupPool[keyId]) clientBackupPool[keyId].used = 0;
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(clientBackupPool));
-
-            try {
-                await fetch('/api/admin/keys/manual-reset', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ key: keyId })
-                });
-                showToast("Key limit reset successfully", "success");
-            } catch(err) { 
-                showToast("Reset failed", "error");
-            }
-            fetchState();
-        }
 
         function generateRandomKey() {
             const hex = 'SHAYAN-' + Array.from({length:16}, () => Math.floor(Math.random()*16).toString(16)).join('').toUpperCase();
@@ -371,14 +262,14 @@ HTML_DASHBOARD = """
             const grid = document.getElementById('toolsGrid');
             const sandboxSelect = document.getElementById('sandboxTool');
             grid.innerHTML = ''; sandboxSelect.innerHTML = '';
-
+            
             toolsList.forEach(t => {
                 grid.innerHTML += `
                     <div class="flex items-center space-x-2 bg-black/20 p-1.5 rounded-xl border border-white/5 hover:border-white/10">
                         <input type="checkbox" value="${t}" id="chk-${t}" class="tool-chk accent-purple-600">
                         <label for="chk-${t}" class="text-[11px] tracking-wide text-gray-300 font-medium capitalize cursor-pointer select-none">${t}</label>
                     </div>`;
-                sandboxSelect.innerHTML += `<option value="${t}" class="bg-[#120b24] capitalize">${t.toUpperCase()} Service Module</option>`;
+                sandboxSelect.innerHTML += `<option value="${t}" class="bg-[#120b24] capitalize">${t.toUpperCase()} Module</option>`;
             });
         }
 
@@ -396,11 +287,15 @@ HTML_DASHBOARD = """
                 const list = document.getElementById('modalList');
                 list.innerHTML = '';
                 toolsList.forEach(t => {
-                    let sampleParam = "num=9876543210";
+                    let sampleParam = "num=8945996482";
                     if(t === 'email') sampleParam = "email=test@gmail.com";
-                    else if(t === 'vehicle') sampleParam = "vehicle=MH02";
+                    else if(t === 'vehicle') sampleParam = "vehicle=KA01AB1234";
+                    else if(t === 'veh2num') sampleParam = "vehicle=KL41V3504";
                     else if(t === 'pan') sampleParam = "pan=ANXPV7978A";
-
+                    else if(t === 'upi') sampleParam = "upi=example@ybl";
+                    else if(t === 'bomber') sampleParam = "number=9876543210&counter=100";
+                    else if(t === 'pk') sampleParam = "num=03331234567";
+                    
                     const sampleUrl = `${host}/api/${t}?key=YOUR_KEY&${sampleParam}`;
                     list.innerHTML += `
                         <div onclick="copyText('${sampleUrl}')" class="p-2.5 bg-black/40 hover:bg-purple-600/10 border border-white/5 hover:border-purple-500/30 rounded-xl cursor-pointer transition flex justify-between items-center group">
@@ -414,35 +309,14 @@ HTML_DASHBOARD = """
 
         function copyText(txt) {
             navigator.clipboard.writeText(txt);
-            showToast("Copied to clipboard!", "success");
         }
 
         async function fetchState() {
             try {
                 const res = await fetch('/api/admin/keys');
-                if (!res.ok) throw new Error("Server error");
-                const data = await res.json();
-
-                // Merge server state into local backup (server wins for used count, local wins for keys server lost)
-                const clientBackupPool = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-
-                // Update local storage with server state
-                data.forEach(k => { 
-                    if (clientBackupPool[k.key]) {
-                        // Server has the key, update used count from server (it's the source of truth for usage)
-                        clientBackupPool[k.key].used = k.used;
-                        clientBackupPool[k.key].status = k.status;
-                    } else {
-                        // Server has a key we don't have (rare, but possible)
-                        clientBackupPool[k.key] = k;
-                    }
-                });
-
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(clientBackupPool));
-
-                const finalRenderPool = Object.values(clientBackupPool);
+                const finalRenderPool = await res.json();
+                
                 document.getElementById('statTotalKeys').innerText = finalRenderPool.length;
-
                 const table = document.getElementById('keysTable');
                 table.innerHTML = '';
                 localKeysCache = {};
@@ -453,7 +327,7 @@ HTML_DASHBOARD = """
                     const badge = isAll ? 'GLOBAL' : `${k.tools.length} Tools`;
                     const isSuspended = k.status === 'Suspended';
                     const consumptionPercentage = Math.min(100, Math.round((k.used / k.limit) * 100) || 0);
-
+                    
                     table.innerHTML += `
                         <tr class="hover:bg-white/5 transition ${isSuspended ? 'opacity-30' : ''}">
                             <td class="py-3 font-sans font-bold text-white pr-2">${k.name}</td>
@@ -476,11 +350,7 @@ HTML_DASHBOARD = """
                         </tr>`;
                 });
                 feather.replace();
-                return data;
-            } catch(e) { 
-                console.log("State sync delayed - awaiting link hydration.");
-                return [];
-            }
+            } catch(e) { console.error("Error drawing active matrix: ", e); }
         }
 
         async function fetchLogs() {
@@ -488,21 +358,19 @@ HTML_DASHBOARD = """
                 const res = await fetch('/api/admin/logs');
                 const data = await res.json();
                 const table = document.getElementById('logsTable');
-
+                
                 let successfulLogsCount = 0;
                 let failedLogsCount = 0;
 
                 if(data.length === 0) {
                     table.innerHTML = `<tr><td colspan="6" class="py-4 text-center text-gray-500 font-sans">Audit stream trace is currently empty.</td></tr>`;
-                    document.getElementById('statSuccess').innerText = 0;
-                    document.getElementById('statFailed').innerText = 0;
                     return;
                 }
 
                 table.innerHTML = '';
                 data.forEach(l => {
                     if(l.status === "Success") successfulLogsCount++; else failedLogsCount++;
-
+                    
                     table.innerHTML += `
                         <tr class="hover:bg-white/5 transition log-row-item">
                             <td class="py-2 text-gray-500 text-[11px]">${l.timestamp}</td>
@@ -510,10 +378,10 @@ HTML_DASHBOARD = """
                             <td class="py-2 text-purple-400">${l.key}</td>
                             <td class="py-2"><span class="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 rounded border border-blue-500/20 text-[10px] font-bold">${l.tool}</span></td>
                             <td class="py-2 text-amber-300 max-w-[180px] truncate">${l.search}</td>
-                            <td class="py-2"><span class="${l.status === 'Success' ? 'text-emerald-400' : 'text-rose-400'} font-bold">${l.status}</span></td>
+                            <td class="py-2"><span class="text-emerald-400 font-bold">${l.status}</span></td>
                         </tr>`;
                 });
-
+                
                 document.getElementById('statSuccess').innerText = successfulLogsCount;
                 document.getElementById('statFailed').innerText = failedLogsCount;
             } catch(e) { }
@@ -521,60 +389,20 @@ HTML_DASHBOARD = """
 
         async function runSandboxTest() {
             const tool = document.getElementById('sandboxTool').value;
-            const key = document.getElementById('sandboxKey').value.trim();
-            const param = document.getElementById('sandboxParam').value.trim();
-
-            if(!key || !param) {
-                showToast("Please fill up required inputs.", "warning");
-                return;
-            }
-
-            const localPool = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-
-            // 🌟 PRE-HYDRATION: If key exists locally but not on server, push it first
-            if (localPool[key]) {
-                try {
-                    await fetch('/api/admin/keys', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(localPool[key])
-                    });
-                } catch(err) { 
-                    console.error("Pre-hydration failed:", err); 
-                }
-            }
-
-            const url = `/api/${tool}?key=${encodeURIComponent(key)}&num=${encodeURIComponent(param)}&email=${encodeURIComponent(param)}&vehicle=${encodeURIComponent(param)}&pan=${encodeURIComponent(param)}`;
-            document.getElementById('sandboxPre').innerText = "Querying live backend engine routes...";
+            const key = document.getElementById('sandboxKey').value;
+            const param = document.getElementById('sandboxParam').value;
+            if(!key || !param) return alert("Please fill up required inputs.");
+            
+            const url = `/api/${tool}?key=${key}&num=${param}&number=${param}&email=${param}&vehicle=${param}&pan=${param}&upi=${param}&counter=10`;
+            document.getElementById('sandboxPre').innerText = "Querying live permanent backend engine routes...";
             document.getElementById('sandboxModal').classList.remove('hidden');
-
+            
             try {
-                let r = await fetch(url);
-
-                // 🌟 If server says key not found (426), force full hydration and retry
-                if (r.status === 426 || r.status === 403) {
-                    showToast("Key not found on server. Re-hydrating...", "warning");
-                    await forceFullHydration();
-                    // Wait a moment for server to process
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                    r = await fetch(url);
-                }
-
+                const r = await fetch(url);
                 const d = await r.json();
                 document.getElementById('sandboxPre').innerText = JSON.stringify(d, null, 4);
-
-                if(d.status && d.status !== "error") {
-                    if(localPool[key]) { 
-                        localPool[key].used = (localPool[key].used || 0) + 1; 
-                        localStorage.setItem(STORAGE_KEY, JSON.stringify(localPool));
-                    }
-                    showToast("Request successful", "success");
-                } else {
-                    showToast(d.message || "Request failed", "error");
-                }
             } catch(e) {
                 document.getElementById('sandboxPre').innerText = "Exception Logged: " + e.toString();
-                showToast("Network error occurred", "error");
             }
             fetchLogs();
             fetchState();
@@ -588,10 +416,10 @@ HTML_DASHBOARD = """
         }
 
         function downloadLogsCSV() {
-            let csv = "Timestamp,Client Label,Token,Route Target,Query Search,Gateway Status\n";
+            let csv = "Timestamp,Client Label,Token,Route Target,Query Search,Gateway Status\\n";
             document.querySelectorAll('.log-row-item').forEach(r => {
                 const tds = Array.from(r.querySelectorAll('td')).map(td => td.innerText.replace(/,/g, ' '));
-                if(tds.length > 0) csv += tds.join(',') + "\n";
+                if(tds.length > 0) csv += tds.join(',') + "\\n";
             });
             const blob = new Blob([csv], { type: 'text/csv' });
             const link = document.createElement('a');
@@ -601,31 +429,30 @@ HTML_DASHBOARD = """
         }
 
         function clearStreamingLogs() {
-            if(confirm("Flush all logs memory?")) {
+            if(confirm("Flush all permanent logs from storage?")) {
                 fetch('/api/admin/logs', {method: 'POST'}).then(() => { fetchLogs(); });
             }
         }
 
-        function clearAllSystemKeys() {
-            if(confirm("Wipe custom user local storage matrix?")) {
-                localStorage.removeItem(STORAGE_KEY);
-                initLocalStorageBackup();
+        async function manuallyRestartKeyLimit(keyId) {
+            try {
+                await fetch('/api/admin/keys/manual-reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: keyId })
+                });
                 fetchState();
-                showToast("Local registry cleared", "info");
-            }
+            } catch(err) { console.error(err); }
         }
 
         document.getElementById('keyForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const isGlobal = document.getElementById('allToolsCheck').checked;
             let selectedTools = ['all'];
-
+            
             if(!isGlobal) {
                 selectedTools = Array.from(document.querySelectorAll('.tool-chk:checked')).map(c => c.value);
-                if(selectedTools.length === 0) { 
-                    showToast("Select at least one tool.", "warning");
-                    return; 
-                }
+                if(selectedTools.length === 0) { return alert("Select at least one tool."); }
             }
 
             const payloadObject = {
@@ -638,20 +465,11 @@ HTML_DASHBOARD = """
                 status: localKeysCache[document.getElementById('apiKey').value]?.status || "Active"
             };
 
-            const clientBackupPool = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-            clientBackupPool[payloadObject.key] = payloadObject;
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(clientBackupPool));
-
-            try {
-                await fetch('/api/admin/keys', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payloadObject)
-                });
-                showToast("Key provisioned successfully", "success");
-            } catch(err) {
-                showToast("Server save failed, but key is saved locally", "warning");
-            }
+            await fetch('/api/admin/keys', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payloadObject)
+            });
 
             resetFormState();
             fetchState();
@@ -666,7 +484,7 @@ HTML_DASHBOARD = """
             document.getElementById('apiKey').readOnly = true;
             document.getElementById('keyLimit').value = k.limit;
             document.getElementById('keyExpire').value = k.expire_date;
-
+            
             const isAll = k.tools.includes('all');
             document.getElementById('allToolsCheck').checked = isAll;
             toggleAllTools({checked: isAll});
@@ -689,53 +507,23 @@ HTML_DASHBOARD = """
 
         async function toggleSuspend(keyId, currentStatus) {
             const newStatus = currentStatus === 'Active' ? 'Suspended' : 'Active';
-            const clientBackupPool = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-            if(clientBackupPool[keyId]) clientBackupPool[keyId].status = newStatus;
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(clientBackupPool));
-
-            try {
-                await fetch('/api/admin/keys/status', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ key: keyId, status: newStatus })
-                });
-                showToast(`Key ${newStatus.toLowerCase()}`, "success");
-            } catch(err) {
-                showToast("Status update failed", "error");
-            }
+            await fetch('/api/admin/keys/status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: keyId, status: newStatus })
+            });
             fetchState();
         }
 
         async function dropKey(keyId) {
-            if(confirm("Permanently wipe this routing token?")) {
-                const clientBackupPool = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-                delete clientBackupPool[keyId];
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(clientBackupPool));
-
-                try {
-                    await fetch(`/api/admin/keys/delete/${keyId}`, { method: 'DELETE' });
-                    showToast("Key deleted", "success");
-                } catch(err) {
-                    showToast("Server delete failed, removed locally", "warning");
-                }
+            if(confirm("Permanently wipe this routing token from database?")) {
+                await fetch(`/api/admin/keys/delete/${keyId}`, { method: 'DELETE' });
                 fetchState();
             }
         }
 
-        initLocalStorageBackup();
         initToolsCheckboxes();
-
-        // Initial load with hydration check
-        (async function init() {
-            await fetchState();
-            // If server has no keys except master, hydrate everything
-            const serverKeys = Object.keys(localKeysCache);
-            const localPool = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-            if (serverKeys.length < Object.keys(localPool).length) {
-                await forceFullHydration();
-            }
-        })();
-
+        fetchState();
         setInterval(fetchLogs, 5000);
         setTimeout(() => { feather.replace(); }, 500);
     </script>
@@ -743,11 +531,11 @@ HTML_DASHBOARD = """
 </html>
 """
 
-def check_key_validity(api_key, tool_name):
-    if api_key not in DB["keys"]:
-        return False, "DEHYDRATED_KEY_DETECTED"
-
-    key_data = DB["keys"][api_key]
+def check_key_validity(db, api_key, tool_name):
+    if api_key not in db["keys"]:
+        return False, "KEY_NOT_FOUND"
+        
+    key_data = db["keys"][api_key]
     if key_data.get("status", "Active") == "Suspended":
         return False, "This API access footprint has been explicitly suspended."
     try:
@@ -791,78 +579,65 @@ def dashboard():
 
 @app.route('/api/admin/keys', methods=['GET', 'POST'])
 def handle_keys():
+    db = load_db()
     if request.method == 'POST':
         data = request.json or {}
         key_id = data.get('key')
         if not key_id:
             return jsonify({"status": "error", "message": "Key code is mandatory"}), 400
-        DB["keys"][key_id] = {
+        db["keys"][key_id] = {
             "name": data.get('name', 'Client Target Profile'),
             "key": key_id,
             "expire_date": data.get('expire_date', '2026-12-31T23:59'),
             "limit": int(data.get('limit', 100)),
-            "used": int(data.get('used', DB["keys"].get(key_id, {}).get("used", 0))),
-            "status": data.get('status', DB["keys"].get(key_id, {}).get("status", "Active")),
+            "used": int(data.get('used', db["keys"].get(key_id, {}).get("used", 0))),
+            "status": data.get('status', db["keys"].get(key_id, {}).get("status", "Active")),
             "tools": data.get('tools', ['all'])
         }
+        save_db(db)
         return jsonify({"status": "success"})
-    return jsonify(list(DB["keys"].values()))
+    return jsonify(list(db["keys"].values()))
 
 @app.route('/api/admin/keys/manual-reset', methods=['POST'])
 def manual_reset_key():
+    db = load_db()
     data = request.json or {}
     key_id = data.get('key')
-    if key_id in DB["keys"]:
-        DB["keys"][key_id]["used"] = 0
+    if key_id in db["keys"]:
+        db["keys"][key_id]["used"] = 0
+        save_db(db)
         return jsonify({"status": "success"})
     return jsonify({"status": "error", "message": "Key target profile not found"}), 404
 
-@app.route('/api/admin/keys/sync', methods=['POST'])
-def sync_all_keys():
-    data = request.json or {}
-    received_keys = data.get('keys', [])
-    synced_count = 0
-    for k in received_keys:
-        key_id = k.get('key')
-        if key_id:
-            if key_id not in DB["keys"]:
-                DB["keys"][key_id] = k
-                synced_count += 1
-            else:
-                # Update only if local data is newer or missing fields
-                existing = DB["keys"][key_id]
-                existing["name"] = k.get("name", existing["name"])
-                existing["limit"] = k.get("limit", existing["limit"])
-                existing["expire_date"] = k.get("expire_date", existing["expire_date"])
-                existing["tools"] = k.get("tools", existing["tools"])
-                existing["status"] = k.get("status", existing["status"])
-                # Keep the higher used count (server is source of truth for usage)
-                existing["used"] = max(existing.get("used", 0), k.get("used", 0))
-    return jsonify({"status": "success", "synced_count": synced_count})
-
 @app.route('/api/admin/keys/status', methods=['POST'])
 def change_status():
+    db = load_db()
     data = request.json or {}
     key_id = data.get('key')
     new_status = data.get('status')
-    if key_id in DB["keys"]:
-        DB["keys"][key_id]["status"] = new_status
+    if key_id in db["keys"]:
+        db["keys"][key_id]["status"] = new_status
+        save_db(db)
         return jsonify({"status": "success"})
     return jsonify({"status": "error", "message": "Token not found"}), 404
 
 @app.route('/api/admin/keys/delete/<key_id>', methods=['DELETE'])
 def drop_key(key_id):
-    if key_id in DB["keys"]:
-        del DB["keys"][key_id]
+    db = load_db()
+    if key_id in db["keys"]:
+        del db["keys"][key_id]
+        save_db(db)
         return jsonify({"status": "success"})
     return jsonify({"status": "error"}), 404
 
 @app.route('/api/admin/logs', methods=['GET', 'POST'])
 def handle_logs():
+    db = load_db()
     if request.method == 'POST':
-        DB["logs"] = []
+        db["logs"] = []
+        save_db(db)
         return jsonify({"status": "success"})
-    return jsonify(DB["logs"])
+    return jsonify(db["logs"])
 
 @app.route('/api/<tool>', methods=['GET'])
 def proxy_gateway(tool):
@@ -871,25 +646,18 @@ def proxy_gateway(tool):
     user_key = request.args.get('key')
     if not user_key:
         return jsonify({"status": "error", "developer": "SHAYAN_EXPLORER", "message": "Missing key parameters."}), 401
-
-    is_valid, result = check_key_validity(user_key, tool)
-
-    # 🌟 IMPROVED: Better re-hydration hint with 403 so frontend can catch it too
-    if not is_valid and result == "DEHYDRATED_KEY_DETECTED":
-        return jsonify({
-            "status": "error",
-            "developer": "SHAYAN_EXPLORER",
-            "message": "DEHYDRATED_KEY_DETECTED",
-            "hint": "Server restarted. Please click 'Sync Keys' button or the key will auto-sync when you return to this tab."
-        }), 403  # Changed from 426 to 403 for better frontend handling
-
+    
+    db = load_db()
+    is_valid, result = check_key_validity(db, user_key, tool)
+    
     if not is_valid:
         return jsonify({"status": "error", "developer": "SHAYAN_EXPLORER", "message": result}), 403
 
     key_data = result
     search_query = "Dynamic Data Request"
-
-    for param in ['num', 'email', 'vehicle', 'username', 'uid', 'id', 'upi', 'ifsc', 'imei', 'ip', 'pin', 'info', 'pan']:
+    
+    # स्मार्ट लॉग पैरामीटर फिल्टरिंग
+    for param in ['num', 'number', 'email', 'vehicle', 'username', 'uid', 'id', 'upi', 'ifsc', 'imei', 'ip', 'pin', 'info', 'pan']:
         if request.args.get(param):
             search_query = f"{param}: {request.args.get(param)}"
             break
@@ -907,9 +675,9 @@ def proxy_gateway(tool):
         response_data = {"status": "error", "message": f"Link failure: {str(e)}"}
 
     if response.status_code == 200:
-        key_data["used"] = int(key_data.get("used", 0)) + 1
-
-    DB["logs"].insert(0, {
+        db["keys"][user_key]["used"] = int(db["keys"][user_key].get("used", 0)) + 1
+        
+    db["logs"].insert(0, {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "key_name": key_data["name"],
         "key": user_key,
@@ -917,6 +685,8 @@ def proxy_gateway(tool):
         "search": search_query,
         "status": "Success" if response.status_code == 200 else "Failed"
     })
+    
+    save_db(db)
 
     if isinstance(response_data, dict):
         response_data["developer"] = "SHAYAN_EXPLORER"
