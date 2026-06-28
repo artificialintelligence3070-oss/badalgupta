@@ -1,8 +1,7 @@
 import os
-import json
 import secrets
 import requests
-from Flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string
 from datetime import datetime
 from dateutil import parser
 
@@ -11,48 +10,29 @@ app = Flask(__name__)
 TARGET_API_BASE = "https://ft-osint-api.duckdns.org/api"
 UPSTREAM_DEFAULT_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
 
-# --- FILE DATABASE SYSTEM (PERMANENT STORAGE) ---
-DB_FILE = "keys_db.json"
-
-def load_db():
-    if not os.path.exists(DB_FILE):
-        default_db = {
-            "keys": {
-                "SHAYAN-MASTER": {
-                    "name": "Master Enterprise Dev",
-                    "key": "SHAYAN-MASTER",
-                    "expire_date": "2026-12-31T23:59",
-                    "limit": 1000,
-                    "used": 0,
-                    "status": "Active",
-                    "tools": ["all"]
-                }
-            },
-            "logs": []
+# इन-मेमरी डेटाबेस जो री-हाइड्रेशन फॉलबैक के साथ काम करता है
+DB = {
+    "keys": {
+        "SHAYAN-MASTER": {
+            "name": "Master Enterprise Dev",
+            "key": "SHAYAN-MASTER",
+            "expire_date": "2026-12-31T23:59",
+            "limit": 1000,
+            "used": 0,
+            "status": "Active",
+            "tools": ["all"]
         }
-        with open(DB_FILE, 'w') as f:
-            json.dump(default_db, f, indent=4)
-        return default_db
-    try:
-        with open(DB_FILE, 'r') as f:
-            return json.load(f)
-    except Exception:
-        return {"keys": {}, "logs": []}
+    },
+    "logs": []
+}
 
-def save_db(data):
-    try:
-        with open(DB_FILE, 'w') as f:
-            json.dump(data, f, indent=4)
-    except Exception as e:
-        print(f"Error saving database file: {str(e)}")
-
-# नए टूल्स (veh2num, bomber, pk) को सपोर्टेड लिस्ट में जोड़ दिया गया है
+# यहाँ पूरे 28 APIs को लिस्ट में जोड़ दिया गया है
 SUPPORTED_TOOLS = [
     "adv", "paytm", "imei", "calltracer", "upi", "ifsc", 
     "number", "pincode", "ip", "challan", "ff", "bgmi", 
     "snap", "email", "vehicle", "git", "insta", "tg", 
     "tgidinfo", "numleak", "pan", "adharfamily", "aadhar",
-    "numtoupi", "veh2num", "bomber", "pk"
+    "veh2num", "bomber", "pk", "passport", "driving", "voter"
 ]
 
 # --- QUANTUM DASHBOARD UI TEMPLATE ---
@@ -93,7 +73,7 @@ HTML_DASHBOARD = """
         <div class="flex items-center space-x-6 bg-black/30 px-4 py-1.5 rounded-xl border border-white/5 text-xs">
             <div class="text-center">
                 <span class="text-gray-400 block text-[9px] uppercase font-bold">Total Key Registry</span>
-                <span id="statTotalKeys" class="font-mono text-purple-400 font-bold">0</span>
+                <span id="statTotalKeys" class="font-mono text-purple-400 font-bold">1</span>
             </div>
             <div class="w-px h-6 bg-white/10"></div>
             <div class="text-center">
@@ -111,7 +91,7 @@ HTML_DASHBOARD = """
             <button onclick="toggleModal(true)" class="px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-xl border border-purple-500/20 text-xs font-bold tracking-wide flex items-center space-x-2 transition">
                 <i data-feather="code" class="w-4 h-4"></i> <span>API Routes Guide</span>
             </button>
-            <button onclick="fetchState()" class="p-2 bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5 rounded-xl transition" title="Refresh State">
+            <button onclick="syncClientToServerFallback()" class="p-2 bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5 rounded-xl transition" title="Force State Sync">
                 <i data-feather="refresh-cw" class="w-4 h-4"></i>
             </button>
         </div>
@@ -170,7 +150,7 @@ HTML_DASHBOARD = """
                     <div class="space-y-2 text-xs">
                         <select id="sandboxTool" class="w-full bg-black/40 border border-white/10 rounded-xl p-2 text-gray-300 focus:outline-none focus:border-indigo-500"></select>
                         <input type="text" id="sandboxKey" placeholder="Enter Valid API Key Token" class="w-full bg-black/40 border border-white/10 rounded-xl p-2 font-mono text-purple-300">
-                        <input type="text" id="sandboxParam" placeholder="Value (e.g. MH02, KL41, 987654...)" class="w-full bg-black/40 border border-white/10 rounded-xl p-2">
+                        <input type="text" id="sandboxParam" placeholder="Value (e.g. Mobile, PAN, UID)" class="w-full bg-black/40 border border-white/10 rounded-xl p-2">
                         <button onclick="runSandboxTest()" class="w-full py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition text-[11px]">FIRE SANDBOX DATA ROUTE</button>
                     </div>
                 </div>
@@ -178,7 +158,8 @@ HTML_DASHBOARD = """
 
             <div class="lg:col-span-2 glass rounded-2xl p-6 flex flex-col max-h-[640px] shadow-xl">
                 <div class="flex flex-wrap justify-between items-center mb-4 gap-2">
-                    <h2 class="text-xs font-black uppercase tracking-wider text-indigo-400 flex items-center"><i data-feather="shield" class="w-4 h-4 mr-2"></i> Runtime Permanent Database Matrix</h2>
+                    <h2 class="text-xs font-black uppercase tracking-wider text-indigo-400 flex items-center"><i data-feather="shield" class="w-4 h-4 mr-2"></i> Runtime System Database Matrix</h2>
+                    <button onclick="clearAllSystemKeys()" class="text-[10px] bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 px-2 py-1 rounded-lg font-bold transition">Wipe Custom Registry</button>
                 </div>
                 
                 <div class="overflow-x-auto flex-1 overflow-y-auto">
@@ -250,8 +231,33 @@ HTML_DASHBOARD = """
     </div>
 
     <script>
-        const toolsList = ["adv","paytm","imei","calltracer","upi","ifsc","number","pincode","ip","challan","ff","bgmi","snap","email","vehicle","git","insta","tg","tgidinfo","numleak","pan","adharfamily","aadhar","numtoupi","veh2num","bomber","pk"];
+        // यहाँ भी पूरे 28 टूल्स लिस्टेड हैं
+        const toolsList = ["adv","paytm","imei","calltracer","upi","ifsc","number","pincode","ip","challan","ff","bgmi","snap","email","vehicle","git","insta","tg","tgidinfo","numleak","pan","adharfamily","aadhar","veh2num","bomber","pk","passport","driving","voter"];
         let localKeysCache = {};
+
+        function initLocalStorageBackup() {
+            if(!localStorage.getItem('SHAYAN_BACKED_KEYS')) {
+                const defaultPool = {
+                    "SHAYAN-MASTER": { "name": "Master Enterprise Dev", "key": "SHAYAN-MASTER", "expire_date": "2026-12-31T23:59", "limit": 1000, "used": 0, "status": "Active", "tools": ["all"] }
+                };
+                localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(defaultPool));
+            }
+        }
+
+        async function syncClientToServerFallback() {
+            initLocalStorageBackup();
+            const localPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
+            
+            try {
+                await fetch('/api/admin/keys/sync', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ keys: Object.values(localPool) })
+                });
+            } catch(err) { console.error("Sync Failure Intercepted: ", err); }
+            
+            fetchState();
+        }
 
         function generateRandomKey() {
             const hex = 'SHAYAN-' + Array.from({length:16}, () => Math.floor(Math.random()*16).toString(16)).join('').toUpperCase();
@@ -269,7 +275,7 @@ HTML_DASHBOARD = """
                         <input type="checkbox" value="${t}" id="chk-${t}" class="tool-chk accent-purple-600">
                         <label for="chk-${t}" class="text-[11px] tracking-wide text-gray-300 font-medium capitalize cursor-pointer select-none">${t}</label>
                     </div>`;
-                sandboxSelect.innerHTML += `<option value="${t}" class="bg-[#120b24] capitalize">${t.toUpperCase()} Module</option>`;
+                sandboxSelect.innerHTML += `<option value="${t}" class="bg-[#120b24] capitalize">${t.toUpperCase()} Service Module</option>`;
             });
         }
 
@@ -287,14 +293,10 @@ HTML_DASHBOARD = """
                 const list = document.getElementById('modalList');
                 list.innerHTML = '';
                 toolsList.forEach(t => {
-                    let sampleParam = "num=8945996482";
+                    let sampleParam = "num=9876543210";
                     if(t === 'email') sampleParam = "email=test@gmail.com";
-                    else if(t === 'vehicle') sampleParam = "vehicle=KA01AB1234";
-                    else if(t === 'veh2num') sampleParam = "vehicle=KL41V3504";
+                    else if(t === 'vehicle' || t === 'veh2num') sampleParam = "vehicle=MH02";
                     else if(t === 'pan') sampleParam = "pan=ANXPV7978A";
-                    else if(t === 'upi') sampleParam = "upi=example@ybl";
-                    else if(t === 'bomber') sampleParam = "number=9876543210&counter=100";
-                    else if(t === 'pk') sampleParam = "num=03331234567";
                     
                     const sampleUrl = `${host}/api/${t}?key=YOUR_KEY&${sampleParam}`;
                     list.innerHTML += `
@@ -309,82 +311,84 @@ HTML_DASHBOARD = """
 
         function copyText(txt) {
             navigator.clipboard.writeText(txt);
+            alert("Endpoint string copied successfully.");
         }
 
         async function fetchState() {
-            try {
-                const res = await fetch('/api/admin/keys');
-                const finalRenderPool = await res.json();
-                
-                document.getElementById('statTotalKeys').innerText = finalRenderPool.length;
-                const table = document.getElementById('keysTable');
-                table.innerHTML = '';
-                localKeysCache = {};
+            const res = await fetch('/api/admin/keys');
+            const data = await res.json();
+            
+            const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
+            data.forEach(k => { clientBackupPool[k.key] = k; });
+            localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
 
-                finalRenderPool.forEach(k => {
-                    localKeysCache[k.key] = k;
-                    const isAll = k.tools.includes('all');
-                    const badge = isAll ? 'GLOBAL' : `${k.tools.length} Tools`;
-                    const isSuspended = k.status === 'Suspended';
-                    const consumptionPercentage = Math.min(100, Math.round((k.used / k.limit) * 100) || 0);
-                    
-                    table.innerHTML += `
-                        <tr class="hover:bg-white/5 transition ${isSuspended ? 'opacity-30' : ''}">
-                            <td class="py-3 font-sans font-bold text-white pr-2">${k.name}</td>
-                            <td class="py-3 text-purple-400 font-bold text-[11px] pr-2">${k.key}</td>
-                            <td class="py-3 pr-2"><span class="px-2 py-0.5 rounded border text-[9px] font-bold ${isAll?'bg-emerald-500/10 text-emerald-400 border-emerald-500/20':'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}">${badge}</span></td>
-                            <td class="py-3 pr-2 w-32">
-                                <div class="text-[10px] text-gray-400 mb-1 flex justify-between"><span>${k.used}/${k.limit}</span> <span>${consumptionPercentage}%</span></div>
-                                <div class="w-full bg-white/10 h-1.5 rounded-full overflow-hidden">
-                                    <div class="bg-gradient-to-r from-purple-500 to-indigo-500 h-full" style="width: ${consumptionPercentage}%"></div>
-                                </div>
-                            </td>
-                            <td class="py-3 text-gray-400 text-[11px] pr-2">${k.expire_date.replace('T', ' ')}</td>
-                            <td class="py-3 pr-2"><span class="text-[10px] font-bold ${isSuspended?'text-rose-400':'text-emerald-400'}">${k.status.toUpperCase()}</span></td>
-                            <td class="py-3 text-right space-x-1 whitespace-nowrap">
-                                <button onclick="manuallyRestartKeyLimit('${k.key}')" class="px-2 py-1 text-[10px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg hover:bg-amber-500/20 transition">Restart Limit</button>
-                                <button onclick="toggleSuspend('${k.key}', '${k.status}')" class="p-1.5 rounded hover:bg-white/5 text-amber-400 inline-block"><i data-feather="${isSuspended?'play':'square'}" class="w-3.5 h-3.5"></i></button>
-                                <button onclick="triggerEdit('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-blue-400 inline-block"><i data-feather="edit-3" class="w-3.5 h-3.5"></i></button>
-                                <button onclick="dropKey('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-rose-400 inline-block"><i data-feather="trash-2" class="w-3.5 h-3.5"></i></button>
-                            </td>
-                        </tr>`;
-                });
-                feather.replace();
-            } catch(e) { console.error("Error drawing active matrix: ", e); }
+            const finalRenderPool = Object.values(clientBackupPool);
+            document.getElementById('statTotalKeys').innerText = finalRenderPool.length;
+
+            const table = document.getElementById('keysTable');
+            table.innerHTML = '';
+            localKeysCache = {};
+
+            finalRenderPool.forEach(k => {
+                localKeysCache[k.key] = k;
+                const isAll = k.tools.includes('all');
+                const badge = isAll ? 'GLOBAL' : `${k.tools.length} Tools`;
+                const isSuspended = k.status === 'Suspended';
+                const consumptionPercentage = Math.min(100, Math.round((k.used / k.limit) * 100) || 0);
+                
+                table.innerHTML += `
+                    <tr class="hover:bg-white/5 transition ${isSuspended ? 'opacity-30' : ''}">
+                        <td class="py-3 font-sans font-bold text-white pr-2">${k.name}</td>
+                        <td class="py-3 text-purple-400 font-bold text-[11px] pr-2">${k.key}</td>
+                        <td class="py-3 pr-2"><span class="px-2 py-0.5 rounded border text-[9px] font-bold ${isAll?'bg-emerald-500/10 text-emerald-400 border-emerald-500/20':'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}">${badge}</span></td>
+                        <td class="py-3 pr-2 w-32">
+                            <div class="text-[10px] text-gray-400 mb-1 flex justify-between"><span>${k.used}/${k.limit}</span> <span>${consumptionPercentage}%</span></div>
+                            <div class="w-full bg-white/10 h-1.5 rounded-full overflow-hidden">
+                                <div class="bg-gradient-to-r from-purple-500 to-indigo-500 h-full" style="width: ${consumptionPercentage}%"></div>
+                            </div>
+                        </td>
+                        <td class="py-3 text-gray-400 text-[11px] pr-2">${k.expire_date.replace('T', ' ')}</td>
+                        <td class="py-3 pr-2"><span class="text-[10px] font-bold ${isSuspended?'text-rose-400':'text-emerald-400'}">${k.status.toUpperCase()}</span></td>
+                        <td class="py-3 text-right space-x-1 whitespace-nowrap">
+                            <button onclick="toggleSuspend('${k.key}', '${k.status}')" class="p-1.5 rounded hover:bg-white/5 text-amber-400 inline-block"><i data-feather="${isSuspended?'play':'square'}" class="w-3.5 h-3.5"></i></button>
+                            <button onclick="triggerEdit('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-blue-400 inline-block"><i data-feather="edit-3" class="w-3.5 h-3.5"></i></button>
+                            <button onclick="dropKey('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-rose-400 inline-block"><i data-feather="trash-2" class="w-3.5 h-3.5"></i></button>
+                        </td>
+                    </tr>`;
+            });
+            feather.replace();
         }
 
         async function fetchLogs() {
-            try {
-                const res = await fetch('/api/admin/logs');
-                const data = await res.json();
-                const table = document.getElementById('logsTable');
-                
-                let successfulLogsCount = 0;
-                let failedLogsCount = 0;
+            const res = await fetch('/api/admin/logs');
+            const data = await res.json();
+            const table = document.getElementById('logsTable');
+            
+            let successfulLogsCount = 0;
+            let failedLogsCount = 0;
 
-                if(data.length === 0) {
-                    table.innerHTML = `<tr><td colspan="6" class="py-4 text-center text-gray-500 font-sans">Audit stream trace is currently empty.</td></tr>`;
-                    return;
-                }
+            if(data.length === 0) {
+                table.innerHTML = `<tr><td colspan="6" class="py-4 text-center text-gray-500 font-sans">Audit stream trace is currently empty.</td></tr>`;
+                return;
+            }
 
-                table.innerHTML = '';
-                data.forEach(l => {
-                    if(l.status === "Success") successfulLogsCount++; else failedLogsCount++;
-                    
-                    table.innerHTML += `
-                        <tr class="hover:bg-white/5 transition log-row-item">
-                            <td class="py-2 text-gray-500 text-[11px]">${l.timestamp}</td>
-                            <td class="py-2 font-sans text-white">${l.key_name}</td>
-                            <td class="py-2 text-purple-400">${l.key}</td>
-                            <td class="py-2"><span class="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 rounded border border-blue-500/20 text-[10px] font-bold">${l.tool}</span></td>
-                            <td class="py-2 text-amber-300 max-w-[180px] truncate">${l.search}</td>
-                            <td class="py-2"><span class="text-emerald-400 font-bold">${l.status}</span></td>
-                        </tr>`;
-                });
+            table.innerHTML = '';
+            data.forEach(l => {
+                if(l.status === "Success") successfulLogsCount++; else failedLogsCount++;
                 
-                document.getElementById('statSuccess').innerText = successfulLogsCount;
-                document.getElementById('statFailed').innerText = failedLogsCount;
-            } catch(e) { }
+                table.innerHTML += `
+                    <tr class="hover:bg-white/5 transition log-row-item">
+                        <td class="py-2 text-gray-500 text-[11px]">${l.timestamp}</td>
+                        <td class="py-2 font-sans text-white">${l.key_name}</td>
+                        <td class="py-2 text-purple-400">${l.key}</td>
+                        <td class="py-2"><span class="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 rounded border border-blue-500/20 text-[10px] font-bold">${l.tool}</span></td>
+                        <td class="py-2 text-amber-300 max-w-[180px] truncate">${l.search}</td>
+                        <td class="py-2"><span class="text-emerald-400 font-bold">${l.status}</span></td>
+                    </tr>`;
+            });
+            
+            document.getElementById('statSuccess').innerText = successfulLogsCount;
+            document.getElementById('statFailed').innerText = failedLogsCount;
         }
 
         async function runSandboxTest() {
@@ -393,14 +397,28 @@ HTML_DASHBOARD = """
             const param = document.getElementById('sandboxParam').value;
             if(!key || !param) return alert("Please fill up required inputs.");
             
-            const url = `/api/${tool}?key=${key}&num=${param}&number=${param}&email=${param}&vehicle=${param}&pan=${param}&upi=${param}&counter=10`;
-            document.getElementById('sandboxPre').innerText = "Querying live permanent backend engine routes...";
+            const localPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
+            if (localPool[key]) {
+                await fetch('/api/admin/keys', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(localPool[key])
+                });
+            }
+
+            const url = `/api/${tool}?key=${key}&num=${param}&email=${param}&vehicle=${param}&pan=${param}`;
+            document.getElementById('sandboxPre').innerText = "Querying live backend engine routes...";
             document.getElementById('sandboxModal').classList.remove('hidden');
             
             try {
                 const r = await fetch(url);
                 const d = await r.json();
                 document.getElementById('sandboxPre').innerText = JSON.stringify(d, null, 4);
+                
+                if(d.status && d.status !== "error") {
+                    if(localPool[key]) { localPool[key].used = (localPool[key].used || 0) + 1; }
+                    localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(localPool));
+                }
             } catch(e) {
                 document.getElementById('sandboxPre').innerText = "Exception Logged: " + e.toString();
             }
@@ -429,20 +447,17 @@ HTML_DASHBOARD = """
         }
 
         function clearStreamingLogs() {
-            if(confirm("Flush all permanent logs from storage?")) {
+            if(confirm("Flush all logs memory?")) {
                 fetch('/api/admin/logs', {method: 'POST'}).then(() => { fetchLogs(); });
             }
         }
 
-        async function manuallyRestartKeyLimit(keyId) {
-            try {
-                await fetch('/api/admin/keys/manual-reset', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ key: keyId })
-                });
+        function clearAllSystemKeys() {
+            if(confirm("Wipe custom user local storage matrix?")) {
+                localStorage.removeItem('SHAYAN_BACKED_KEYS');
+                initLocalStorageBackup();
                 fetchState();
-            } catch(err) { console.error(err); }
+            }
         }
 
         document.getElementById('keyForm').addEventListener('submit', async (e) => {
@@ -464,6 +479,10 @@ HTML_DASHBOARD = """
                 used: localKeysCache[document.getElementById('apiKey').value]?.used || 0,
                 status: localKeysCache[document.getElementById('apiKey').value]?.status || "Active"
             };
+
+            const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
+            clientBackupPool[payloadObject.key] = payloadObject;
+            localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
 
             await fetch('/api/admin/keys', {
                 method: 'POST',
@@ -507,6 +526,10 @@ HTML_DASHBOARD = """
 
         async function toggleSuspend(keyId, currentStatus) {
             const newStatus = currentStatus === 'Active' ? 'Suspended' : 'Active';
+            const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
+            if(clientBackupPool[keyId]) clientBackupPool[keyId].status = newStatus;
+            localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
+
             await fetch('/api/admin/keys/status', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -516,26 +539,31 @@ HTML_DASHBOARD = """
         }
 
         async function dropKey(keyId) {
-            if(confirm("Permanently wipe this routing token from database?")) {
+            if(confirm("Permanently wipe this routing token?")) {
+                const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
+                delete clientBackupPool[keyId];
+                localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
+
                 await fetch(`/api/admin/keys/delete/${keyId}`, { method: 'DELETE' });
                 fetchState();
             }
         }
 
+        initLocalStorageBackup();
         initToolsCheckboxes();
-        fetchState();
-        setInterval(fetchLogs, 5000);
+        syncClientToServerFallback();
+        setInterval(fetchLogs, 3000);
         setTimeout(() => { feather.replace(); }, 500);
     </script>
 </body>
 </html>
 """
 
-def check_key_validity(db, api_key, tool_name):
-    if api_key not in db["keys"]:
-        return False, "KEY_NOT_FOUND"
+def check_key_validity(api_key, tool_name):
+    if api_key not in DB["keys"]:
+        return False, "DEHYDRATED_KEY_DETECTED"
         
-    key_data = db["keys"][api_key]
+    key_data = DB["keys"][api_key]
     if key_data.get("status", "Active") == "Suspended":
         return False, "This API access footprint has been explicitly suspended."
     try:
@@ -579,65 +607,61 @@ def dashboard():
 
 @app.route('/api/admin/keys', methods=['GET', 'POST'])
 def handle_keys():
-    db = load_db()
     if request.method == 'POST':
         data = request.json or {}
         key_id = data.get('key')
         if not key_id:
             return jsonify({"status": "error", "message": "Key code is mandatory"}), 400
-        db["keys"][key_id] = {
+        DB["keys"][key_id] = {
             "name": data.get('name', 'Client Target Profile'),
             "key": key_id,
             "expire_date": data.get('expire_date', '2026-12-31T23:59'),
             "limit": int(data.get('limit', 100)),
-            "used": int(data.get('used', db["keys"].get(key_id, {}).get("used", 0))),
-            "status": data.get('status', db["keys"].get(key_id, {}).get("status", "Active")),
+            "used": int(data.get('used', DB["keys"].get(key_id, {}).get("used", 0))),
+            "status": data.get('status', DB["keys"].get(key_id, {}).get("status", "Active")),
             "tools": data.get('tools', ['all'])
         }
-        save_db(db)
         return jsonify({"status": "success"})
-    return jsonify(list(db["keys"].values()))
+    return jsonify(list(DB["keys"].values()))
 
-@app.route('/api/admin/keys/manual-reset', methods=['POST'])
-def manual_reset_key():
-    db = load_db()
+@app.route('/api/admin/keys/sync', methods=['POST'])
+def sync_all_keys():
     data = request.json or {}
-    key_id = data.get('key')
-    if key_id in db["keys"]:
-        db["keys"][key_id]["used"] = 0
-        save_db(db)
-        return jsonify({"status": "success"})
-    return jsonify({"status": "error", "message": "Key target profile not found"}), 404
+    received_keys = data.get('keys', [])
+    for k in received_keys:
+        key_id = k.get('key')
+        if key_id:
+            if key_id not in DB["keys"]:
+                DB["keys"][key_id] = k
+            else:
+                DB["keys"][key_id]["name"] = k.get("name", DB["keys"][key_id]["name"])
+                DB["keys"][key_id]["limit"] = k.get("limit", DB["keys"][key_id]["limit"])
+                DB["keys"][key_id]["expire_date"] = k.get("expire_date", DB["keys"][key_id]["expire_date"])
+    return jsonify({"status": "success", "synced_count": len(received_keys)})
 
 @app.route('/api/admin/keys/status', methods=['POST'])
 def change_status():
-    db = load_db()
     data = request.json or {}
     key_id = data.get('key')
     new_status = data.get('status')
-    if key_id in db["keys"]:
-        db["keys"][key_id]["status"] = new_status
-        save_db(db)
+    if key_id in DB["keys"]:
+        DB["keys"][key_id]["status"] = new_status
         return jsonify({"status": "success"})
     return jsonify({"status": "error", "message": "Token not found"}), 404
 
 @app.route('/api/admin/keys/delete/<key_id>', methods=['DELETE'])
 def drop_key(key_id):
-    db = load_db()
-    if key_id in db["keys"]:
-        del db["keys"][key_id]
-        save_db(db)
+    if key_id in DB["keys"]:
+        del DB["keys"][key_id]
         return jsonify({"status": "success"})
     return jsonify({"status": "error"}), 404
 
 @app.route('/api/admin/logs', methods=['GET', 'POST'])
 def handle_logs():
-    db = load_db()
     if request.method == 'POST':
-        db["logs"] = []
-        save_db(db)
+        DB["logs"] = []
         return jsonify({"status": "success"})
-    return jsonify(db["logs"])
+    return jsonify(DB["logs"])
 
 @app.route('/api/<tool>', methods=['GET'])
 def proxy_gateway(tool):
@@ -647,17 +671,22 @@ def proxy_gateway(tool):
     if not user_key:
         return jsonify({"status": "error", "developer": "SHAYAN_EXPLORER", "message": "Missing key parameters."}), 401
     
-    db = load_db()
-    is_valid, result = check_key_validity(db, user_key, tool)
+    is_valid, result = check_key_validity(user_key, tool)
     
+    if not is_valid and result == "DEHYDRATED_KEY_DETECTED":
+        return jsonify({
+            "status": "error",
+            "developer": "SHAYAN_EXPLORER",
+            "message": "Gateway session synchronized. Please execute your network request again from the dashboard to auto-authenticate."
+        }), 426
+
     if not is_valid:
         return jsonify({"status": "error", "developer": "SHAYAN_EXPLORER", "message": result}), 403
 
     key_data = result
     search_query = "Dynamic Data Request"
     
-    # स्मार्ट लॉग पैरामीटर फिल्टरिंग
-    for param in ['num', 'number', 'email', 'vehicle', 'username', 'uid', 'id', 'upi', 'ifsc', 'imei', 'ip', 'pin', 'info', 'pan']:
+    for param in ['num', 'email', 'vehicle', 'username', 'uid', 'id', 'upi', 'ifsc', 'imei', 'ip', 'pin', 'info', 'pan']:
         if request.args.get(param):
             search_query = f"{param}: {request.args.get(param)}"
             break
@@ -675,9 +704,9 @@ def proxy_gateway(tool):
         response_data = {"status": "error", "message": f"Link failure: {str(e)}"}
 
     if response.status_code == 200:
-        db["keys"][user_key]["used"] = int(db["keys"][user_key].get("used", 0)) + 1
+        key_data["used"] = int(key_data.get("used", 0)) + 1
         
-    db["logs"].insert(0, {
+    DB["logs"].insert(0, {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "key_name": key_data["name"],
         "key": user_key,
@@ -685,8 +714,6 @@ def proxy_gateway(tool):
         "search": search_query,
         "status": "Success" if response.status_code == 200 else "Failed"
     })
-    
-    save_db(db)
 
     if isinstance(response_data, dict):
         response_data["developer"] = "SHAYAN_EXPLORER"
