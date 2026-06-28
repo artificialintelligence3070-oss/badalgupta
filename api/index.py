@@ -9,6 +9,7 @@ app = Flask(__name__)
 
 TARGET_API_BASE = "https://ft-osint-api.duckdns.org/api"
 UPSTREAM_DEFAULT_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
+TELEGRAM_CHANNEL_LINK = "https://t.me/shayan_explorer_channel"
 
 # इन-मेमरी डेटाबेस जो री-हाइड्रेशन फॉलबैक के साथ काम करता है
 DB = {
@@ -26,7 +27,7 @@ DB = {
     "logs": []
 }
 
-# यहाँ पूरे 28 APIs को लिस्ट में जोड़ दिया गया है
+# पूरे 28 APIs की लिस्ट
 SUPPORTED_TOOLS = [
     "adv", "paytm", "imei", "calltracer", "upi", "ifsc", 
     "number", "pincode", "ip", "challan", "ff", "bgmi", 
@@ -88,6 +89,9 @@ HTML_DASHBOARD = """
         </div>
 
         <div class="flex items-center space-x-2">
+            <a href="https://t.me/shayan_explorer_channel" target="_blank" class="px-3 py-2 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 rounded-xl border border-blue-500/20 text-xs font-bold flex items-center space-x-1.5 transition">
+                <i data-feather="send" class="w-3.5 h-3.5"></i> <span>Telegram Channel</span>
+            </a>
             <button onclick="toggleModal(true)" class="px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-xl border border-purple-500/20 text-xs font-bold tracking-wide flex items-center space-x-2 transition">
                 <i data-feather="code" class="w-4 h-4"></i> <span>API Routes Guide</span>
             </button>
@@ -231,7 +235,6 @@ HTML_DASHBOARD = """
     </div>
 
     <script>
-        // यहाँ भी पूरे 28 टूल्स लिस्टेड हैं
         const toolsList = ["adv","paytm","imei","calltracer","upi","ifsc","number","pincode","ip","challan","ff","bgmi","snap","email","vehicle","git","insta","tg","tgidinfo","numleak","pan","adharfamily","aadhar","veh2num","bomber","pk","passport","driving","voter"];
         let localKeysCache = {};
 
@@ -350,6 +353,7 @@ HTML_DASHBOARD = """
                         <td class="py-3 text-gray-400 text-[11px] pr-2">${k.expire_date.replace('T', ' ')}</td>
                         <td class="py-3 pr-2"><span class="text-[10px] font-bold ${isSuspended?'text-rose-400':'text-emerald-400'}">${k.status.toUpperCase()}</span></td>
                         <td class="py-3 text-right space-x-1 whitespace-nowrap">
+                            <button onclick="restartQuota('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-emerald-400 inline-block" title="Restart/Reset Quota Limit"><i data-feather="rotate-ccw" class="w-3.5 h-3.5"></i></button>
                             <button onclick="toggleSuspend('${k.key}', '${k.status}')" class="p-1.5 rounded hover:bg-white/5 text-amber-400 inline-block"><i data-feather="${isSuspended?'play':'square'}" class="w-3.5 h-3.5"></i></button>
                             <button onclick="triggerEdit('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-blue-400 inline-block"><i data-feather="edit-3" class="w-3.5 h-3.5"></i></button>
                             <button onclick="dropKey('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-rose-400 inline-block"><i data-feather="trash-2" class="w-3.5 h-3.5"></i></button>
@@ -357,6 +361,23 @@ HTML_DASHBOARD = """
                     </tr>`;
             });
             feather.replace();
+        }
+
+        async function restartQuota(keyId) {
+            if(confirm("Are you sure you want to restart/reset the request limit for this key?")) {
+                const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
+                if(clientBackupPool[keyId]) {
+                    clientBackupPool[keyId].used = 0;
+                }
+                localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
+
+                await fetch('/api/admin/keys/restart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: keyId })
+                });
+                fetchState();
+            }
         }
 
         async function fetchLogs() {
@@ -415,7 +436,7 @@ HTML_DASHBOARD = """
                 const d = await r.json();
                 document.getElementById('sandboxPre').innerText = JSON.stringify(d, null, 4);
                 
-                if(d.status && d.status !== "error") {
+                if(r.status === 200 && d.status && d.status !== "error") {
                     if(localPool[key]) { localPool[key].used = (localPool[key].used || 0) + 1; }
                     localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(localPool));
                 }
@@ -572,8 +593,11 @@ def check_key_validity(api_key, tool_name):
             return False, f"API Key expired automatically on {key_data['expire_date']}."
     except Exception:
         return False, "System runtime token configuration parse exception."
+        
+    # लिमिट ख़त्म होने की कंडीशन और कस्टम टेलीग्राम चैनल मैसेज का इंटीग्रेशन
     if int(key_data["used"]) >= int(key_data["limit"]):
-        return False, f"Allocated quota threshold limit reached ({key_data['limit']})."
+        return False, f"The API limit is finished. If you want to buy more API access, please purchase from our official channel: {TELEGRAM_CHANNEL_LINK}"
+        
     allowed_tools = key_data.get("tools", [])
     if "all" not in allowed_tools and tool_name not in allowed_tools:
         return False, f"Access denied for router parameter: '{tool_name}'."
@@ -593,7 +617,7 @@ def sanitize_payload(data):
             return [sanitize_payload(i) for i in data]
         elif isinstance(data, str):
             if "https://t.me/lynx_api" in data:
-                data = data.replace("https://t.me/lynx_api", "https://t.me/shayan_explorer_channel")
+                data = data.replace("https://t.me/lynx_api", TELEGRAM_CHANNEL_LINK)
             for b in banned:
                 data = data.replace(b, "SHAYAN_EXPLORER")
             return data
@@ -624,6 +648,16 @@ def handle_keys():
         return jsonify({"status": "success"})
     return jsonify(list(DB["keys"].values()))
 
+# लिमिट रिस्टार्ट (Reset) करने का बैकएंड एंडपॉइंट
+@app.route('/api/admin/keys/restart', methods=['POST'])
+def restart_key_limit():
+    data = request.json or {}
+    key_id = data.get('key')
+    if key_id in DB["keys"]:
+        DB["keys"][key_id]["used"] = 0
+        return jsonify({"status": "success", "message": "Limit restarted successfully."})
+    return jsonify({"status": "error", "message": "Key not found."}), 404
+
 @app.route('/api/admin/keys/sync', methods=['POST'])
 def sync_all_keys():
     data = request.json or {}
@@ -637,6 +671,8 @@ def sync_all_keys():
                 DB["keys"][key_id]["name"] = k.get("name", DB["keys"][key_id]["name"])
                 DB["keys"][key_id]["limit"] = k.get("limit", DB["keys"][key_id]["limit"])
                 DB["keys"][key_id]["expire_date"] = k.get("expire_date", DB["keys"][key_id]["expire_date"])
+                DB["keys"][key_id]["used"] = k.get("used", DB["keys"][key_id]["used"])
+                DB["keys"][key_id]["status"] = k.get("status", DB["keys"][key_id]["status"])
     return jsonify({"status": "success", "synced_count": len(received_keys)})
 
 @app.route('/api/admin/keys/status', methods=['POST'])
