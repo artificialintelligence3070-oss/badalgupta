@@ -18,7 +18,7 @@ DEFAULT_UPSTREAM_KEY = "vx-osint"
 api_keys_db: Dict[str, dict] = {}
 search_logs: List[dict] = []
 
-# Expanded Tools Blueprint Catalog
+# Expanded Tools Blueprint Catalog containing your new endpoints
 TOOLS_LIST = [
     {"id": "adv", "name": "Advanced Lookup", "param": "num"},
     {"id": "paytm", "name": "Paytm Lookup", "param": "num"},
@@ -40,7 +40,7 @@ TOOLS_LIST = [
     {"id": "tg", "name": "Telegram Username to Num", "param": "info"},
     {"id": "tgidinfo", "name": "Telegram ID to Num", "param": "id"},
     {"id": "numleak", "name": "Number Leak Database", "param": "num"},
-    # Newly Added Endpoints
+    # Your newly specified mapping pipelines
     {"id": "pk", "name": "PK Database Lookup", "param": "num"},
     {"id": "name", "name": "Identity Name Search", "param": "name"},
     {"id": "aadhar", "name": "UID Verification System", "param": "num"},
@@ -74,14 +74,14 @@ async def gateway_router(tool_id: str, request: Request):
     key_data = api_keys_db[user_key]
     
     if key_data["status"] == "suspended":
-        raise HTTPException(status_code=403, detail="API Key is suspended")
+        raise HTTPException(status_code=403, detail="API Key is suspended by @vernexzzz ")
         
     expiry = datetime.datetime.strptime(key_data["expiry"], "%Y-%m-%d").date()
     if datetime.date.today() > expiry:
-        raise HTTPException(status_code=403, detail="API Key has expired")
+        raise HTTPException(status_code=403, detail="API Key has expired ok dmm for buy @vernexzzz")
         
     if key_data["uses"] >= key_data["limit"]:
-        raise HTTPException(status_code=429, detail="API Key request limit reached")
+        raise HTTPException(status_code=429, detail="API Key request limit reached dmm for new api @vernexzzz")
         
     if "all" not in key_data["tools"] and tool_id not in key_data["tools"]:
         raise HTTPException(status_code=403, detail="This key is not authorized to use this specific tool")
@@ -176,7 +176,7 @@ def index_page():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>SHAYAN_EXPLORER // CONTROL SUITE</title>
         <script src="https://cdn.tailwindcss.com"></script>
-        <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;800&family=Space+Grotesk:wght@400;700&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght=300;400;600;800&family=Space+Grotesk:wght=400;700&display=swap" rel="stylesheet">
         <style>
             body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #040406; }
             .mono { font-family: 'Space Grotesk', sans-serif; }
