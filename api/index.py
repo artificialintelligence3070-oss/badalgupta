@@ -1,786 +1,506 @@
-import os
-import io
-import json
-import secrets
-import logging
-import requests
-from flask import Flask, request, jsonify, render_template_string
-from datetime import datetime
-from dateutil import parser
+import datetime
+import httpx
+from typing import Dict, List, Optional
+from fastapi import FastAPI, Request, HTTPException, Depends, status
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
 
-# सेटअप क्लीन लॉगिंग फ्रेमवर्क
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("SHAYAN_GATEWAY")
+app = FastAPI(title="SHAYAN_EXPLORER API Gateway")
 
-app = Flask(__name__)
+# Global Config
+ADMIN_USER = "vernex"
+ADMIN_PASS = "vernex@16vx"
+BASE_TARGET_URL = "https://ft-osint-api.duckdns.org/api"
+DEFAULT_UPSTREAM_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
 
-# --- ENTERPRISE BASE PARAMETERS ---
-TARGET_API_BASE = "https://ft-osint-api.duckdns.org/api"
-UPSTREAM_DEFAULT_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
-TELEGRAM_CHANNEL_LINK = "https://t.me/shayan_explorer_channel"
+# In-Memory Database (Will clear on Vercel spin-down; connect a free MongoDB/KV for production permanence)
+api_keys_db: Dict[str, dict] = {}
+search_logs: List[dict] = []
 
-# परसिस्टेंट इन-मेमरी हाइब्रिड डेटाबेस आर्किटेक्चर
-DB = {
-    "keys": {
-        "SHAYAN-MASTER": {
-            "name": "Master Enterprise Dev",
-            "key": "SHAYAN-MASTER",
-            "expire_date": "9999-12-31T23:59",  # लाइफटाइम डिफ़ॉल्ट
-            "limit": 1000000,
-            "used": 0,
-            "status": "Active",
-            "tools": ["all"]
-        }
-    },
-    "logs": []
-}
-
-# सभी 28 प्रोडक्शन-रेडी वैलिडेटेड टूल्स की मास्टर लिस्ट
-SUPPORTED_TOOLS = [
-    "adv", "paytm", "imei", "calltracer", "upi", "ifsc", 
-    "number", "pincode", "ip", "challan", "ff", "bgmi", 
-    "snap", "email", "vehicle", "git", "insta", "tg", 
-    "tgidinfo", "numleak", "pan", "adharfamily", "aadhar",
-    "veh2num", "bomber", "pk", "passport", "driving", "voter"
+# Available Tools Catalog
+TOOLS_LIST = [
+    {"id": "adv", "name": "Advanced Lookup", "param": "num"},
+    {"id": "paytm", "name": "Paytm Lookup", "param": "num"},
+    {"id": "imei", "name": "IMEI Lookup", "param": "imei"},
+    {"id": "calltracer", "name": "Call Tracer", "param": "num"},
+    {"id": "upi", "name": "UPI Verification", "param": "upi"},
+    {"id": "ifsc", "name": "IFSC Details", "param": "ifsc"},
+    {"id": "number", "name": "Standard Number Lookup", "param": "num"},
+    {"id": "pincode", "name": "Pincode Details", "param": "pin"},
+    {"id": "ip", "name": "IP Geolocation", "param": "ip"},
+    {"id": "challan", "name": "Vehicle Challan", "param": "vehicle"},
+    {"id": "ff", "name": "FreeFire UID Info", "param": "uid"},
+    {"id": "bgmi", "name": "BGMI UID Info", "param": "uid"},
+    {"id": "snap", "name": "Snapchat Info", "param": "username"},
+    {"id": "email", "name": "Email to Info", "param": "email"},
+    {"id": "vehicle", "name": "Vehicle Lookup", "param": "vehicle"},
+    {"id": "git", "name": "GitHub Profile Lookup", "param": "username"},
+    {"id": "insta", "name": "Instagram Info", "param": "username"},
+    {"id": "tg", "name": "Telegram Username to Num", "param": "info"},
+    {"id": "tgidinfo", "name": "Telegram ID to Num", "param": "id"},
+    {"id": "numleak", "name": "Number Leak Database", "param": "num"},
 ]
 
-# --- HIGH END ADVANCED QUANTUM UI TEMPLATE ---
-HTML_DASHBOARD = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SHAYAN_EXPLORER | Quantum Enterprise Gateway Hub</title>
-    <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body { background: radial-gradient(circle at top right, #0a0518, #010003); color: #f3f4f6; }
-        .glass { background: rgba(14, 8, 28, 0.7); backdrop-filter: blur(25px); border: 1px solid rgba(255, 255, 255, 0.05); }
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.3); }
-        ::-webkit-scrollbar-thumb { background: rgba(139, 92, 246, 0.3); border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: rgba(139, 92, 246, 0.6); }
-    </style>
-</head>
-<body class="min-h-screen antialiased font-sans pb-12">
+# Models
+class LoginRequest(BaseModel):
+    username: str
+    password: str
 
-    <header class="border-b border-white/5 py-4 px-6 flex flex-wrap justify-between items-center bg-black/50 backdrop-blur-md sticky top-0 z-40 gap-4">
-        <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-purple-500/20">
-                <i data-feather="activity" class="w-5 h-5 text-white"></i>
-            </div>
-            <div>
-                <span class="text-lg font-black tracking-wider text-white block">SHAYAN_EXPLORER</span>
-                <div class="flex items-center space-x-1.5">
-                    <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-ping"></span>
-                    <span class="text-[10px] text-emerald-400 font-bold uppercase tracking-widest">Gateway Engine Operational</span>
-                </div>
-            </div>
-        </div>
-        
-        <div class="flex items-center space-x-6 bg-black/40 px-5 py-2 rounded-xl border border-white/5 text-xs">
-            <div class="text-center">
-                <span class="text-gray-400 block text-[9px] uppercase font-bold tracking-wider">Total Key Registry</span>
-                <span id="statTotalKeys" class="font-mono text-purple-400 font-bold text-sm">1</span>
-            </div>
-            <div class="w-px h-6 bg-white/10"></div>
-            <div class="text-center">
-                <span class="text-gray-400 block text-[9px] uppercase font-bold tracking-wider">Success Stream</span>
-                <span id="statSuccess" class="font-mono text-emerald-400 font-bold text-sm">0</span>
-            </div>
-            <div class="w-px h-6 bg-white/10"></div>
-            <div class="text-center">
-                <span class="text-gray-400 block text-[9px] uppercase font-bold tracking-wider">Failed Block</span>
-                <span id="statFailed" class="font-mono text-rose-400 font-bold text-sm">0</span>
-            </div>
-        </div>
+class KeyGenRequest(BaseModel):
+    key_name: str
+    custom_key: str
+    daily_limit: int
+    expiry_date: str  # YYYY-MM-DD
+    allowed_tools: List[str]  # ["all"] or specific IDs
 
-        <div class="flex items-center space-x-2">
-            <a href="https://t.me/shayan_explorer_channel" target="_blank" class="px-3 py-2 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 rounded-xl border border-blue-500/20 text-xs font-bold flex items-center space-x-1.5 transition">
-                <i data-feather="send" class="w-3.5 h-3.5"></i> <span>Telegram Channel</span>
-            </a>
-            <button onclick="toggleModal(true)" class="px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-xl border border-purple-500/20 text-xs font-bold tracking-wide flex items-center space-x-2 transition">
-                <i data-feather="code" class="w-4 h-4"></i> <span>API Routes Guide</span>
-            </button>
-            <button onclick="syncClientToServerFallback()" class="p-2 bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5 rounded-xl transition" title="Force State Sync">
-                <i data-feather="refresh-cw" class="w-4 h-4"></i>
-            </button>
-        </div>
-    </header>
-
-    <main class="max-w-7xl mx-auto p-4 md:p-6 space-y-6 mt-2">
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            <div class="lg:col-span-1 space-y-6">
-                <div class="glass rounded-2xl p-6 flex flex-col space-y-4 shadow-xl">
-                    <div class="flex justify-between items-center border-b border-white/5 pb-2">
-                        <h2 id="formTitle" class="text-xs font-black tracking-wider text-purple-400 uppercase flex items-center">
-                            <i data-feather="plus-circle" class="mr-2 w-4 h-4"></i> Provision Token Strategy
-                        </h2>
-                        <button type="button" onclick="generateRandomKey()" class="text-[10px] text-indigo-400 font-bold hover:underline flex items-center space-x-1">
-                            <i data-feather="key" class="w-3 h-3"></i> <span>Auto Generate Key</span>
-                        </button>
-                    </div>
-                    
-                    <form id="keyForm" class="space-y-4">
-                        <div>
-                            <label class="block text-[10px] uppercase text-gray-400 font-bold mb-1 tracking-wider">User Identifier Profile</label>
-                            <input type="text" id="clientName" placeholder="Client Label / Company" class="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-purple-500 transition" required>
-                        </div>
-                        <div>
-                            <label class="block text-[10px] uppercase text-gray-400 font-bold mb-1 tracking-wider">Unique API Token Target Signature</label>
-                            <input type="text" id="apiKey" placeholder="SHAYAN-SECRET-CODE" class="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs font-mono text-purple-300 focus:outline-none focus:border-purple-500 transition" required>
-                        </div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <div>
-                                <label class="block text-[10px] uppercase text-gray-400 font-bold mb-1 tracking-wider">Quota Pool Limit</label>
-                                <input type="number" id="keyLimit" value="500" class="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-purple-500 transition" required>
-                            </div>
-                            <div>
-                                <label class="block text-[10px] uppercase text-gray-400 font-bold mb-1 tracking-wider">Expiration Context</label>
-                                <input type="datetime-local" id="keyExpire" value="9999-12-31T23:59" class="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs font-mono text-white focus:outline-none focus:border-purple-500 transition" required>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-[10px] uppercase text-gray-400 font-bold mb-2 tracking-wider">Scope Strategy Authorization Restrictions</label>
-                            <div class="flex items-center space-x-2 mb-2 p-2 bg-purple-950/20 rounded-xl border border-purple-500/10">
-                                <input type="checkbox" id="allToolsCheck" checked onchange="toggleAllTools(this)" class="accent-purple-600">
-                                <label for="allToolsCheck" class="text-[11px] font-bold text-emerald-400 cursor-pointer">Grant Global Authorization (All Tools)</label>
-                            </div>
-                            <div id="toolsGrid" class="grid grid-cols-2 gap-1.5 max-h-32 overflow-y-auto p-1 opacity-40 pointer-events-none transition"></div>
-                        </div>
-                        <div class="flex space-x-2 pt-2">
-                            <button type="button" id="cancelEditBtn" onclick="resetFormState()" class="hidden w-1/3 py-2.5 bg-white/5 hover:bg-white/10 text-gray-400 rounded-xl font-bold text-xs transition">Cancel</button>
-                            <button type="submit" id="submitBtn" class="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl font-bold text-xs tracking-wider transition shadow-lg shadow-purple-600/20">PROVISION ACCESS</button>
-                        </div>
-                    </form>
-                </div>
-
-                <div class="glass rounded-2xl p-4 shadow-xl space-y-3">
-                    <h3 class="text-xs font-black tracking-wider text-indigo-400 uppercase flex items-center"><i data-feather="terminal" class="w-3.5 h-3.5 mr-1.5"></i> Live API Query Sandbox</h3>
-                    <div class="space-y-2 text-xs">
-                        <select id="sandboxTool" class="w-full bg-black/40 border border-white/10 rounded-xl p-2 text-gray-300 focus:outline-none focus:border-indigo-500"></select>
-                        <input type="text" id="sandboxKey" placeholder="Enter Valid API Key Token" class="w-full bg-black/40 border border-white/10 rounded-xl p-2 font-mono text-purple-300">
-                        <input type="text" id="sandboxParam" placeholder="Value (e.g. Mobile, PAN, UID)" class="w-full bg-black/40 border border-white/10 rounded-xl p-2">
-                        <button onclick="runSandboxTest()" class="w-full py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition text-[11px] tracking-wide">FIRE SANDBOX DATA ROUTE</button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="lg:col-span-2 glass rounded-2xl p-6 flex flex-col max-h-[640px] shadow-xl">
-                <div class="flex flex-wrap justify-between items-center mb-4 gap-2">
-                    <h2 class="text-xs font-black uppercase tracking-wider text-indigo-400 flex items-center"><i data-feather="shield" class="w-4 h-4 mr-2"></i> Runtime System Database Matrix</h2>
-                    <button onclick="clearAllSystemKeys()" class="text-[10px] bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 px-2 py-1 rounded-lg font-bold transition">Wipe Custom Registry</button>
-                </div>
-                
-                <div class="overflow-x-auto flex-1 overflow-y-auto">
-                    <table class="w-full text-left text-xs border-collapse">
-                        <thead class="sticky top-0 bg-[#0d071a] z-10 text-gray-400 font-bold uppercase tracking-wider border-b border-white/5">
-                            <tr>
-                                <th class="pb-3 pr-2">Profile ID</th>
-                                <th class="pb-3 pr-2">Token Signature</th>
-                                <th class="pb-3 pr-2">Scope Scope</th>
-                                <th class="pb-3 pr-2">Quota Analytics Usage Meter</th>
-                                <th class="pb-3 pr-2">Expiration</th>
-                                <th class="pb-3 pr-2">Status</th>
-                                <th class="pb-3 text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="keysTable" class="divide-y divide-white/5 font-mono text-gray-300"></tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <div class="glass rounded-2xl p-6 shadow-xl">
-            <div class="flex flex-wrap justify-between items-center mb-4 gap-3">
-                <h2 class="text-xs font-black uppercase tracking-wider text-blue-400 flex items-center"><i data-feather="activity" class="w-4 h-4 mr-2"></i> System Request Streaming Audit Buffer Logs</h2>
-                <div class="flex items-center space-x-2 w-full sm:w-auto">
-                    <input type="text" id="logSearchInput" onkeyup="filterLogRows()" placeholder="Search incoming logs..." class="bg-black/40 border border-white/10 rounded-xl px-3 py-1 text-xs text-gray-300 focus:outline-none focus:border-blue-500 w-full sm:w-48">
-                    <button onclick="downloadLogsCSV()" class="bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-500/20 px-2 py-1 rounded-lg font-bold text-[10px] transition">Export CSV</button>
-                    <button onclick="clearStreamingLogs()" class="bg-rose-600/10 hover:bg-rose-600/20 text-rose-400 border border-rose-500/20 px-2 py-1 rounded-lg font-bold text-[10px] transition">Wipe Log Stream</button>
-                </div>
-            </div>
-            
-            <div class="overflow-x-auto max-h-64 overflow-y-auto">
-                <table id="mainLogsTable" class="w-full text-left text-xs border-collapse">
-                    <thead class="sticky top-0 bg-[#0d071a] border-b border-white/10 text-gray-400 font-bold uppercase">
-                        <tr>
-                            <th class="py-2">Timestamp</th>
-                            <th class="py-2">Client Label</th>
-                            <th class="py-2">Token Value</th>
-                            <th class="py-2">Route Target</th>
-                            <th class="py-2">Param Metadata Queries</th>
-                            <th class="py-2">Gateway Status</th>
-                        </tr>
-                    </thead>
-                    <tbody id="logsTable" class="divide-y divide-white/5 font-mono text-gray-300"></tbody>
-                </table>
-            </div>
-        </div>
-    </main>
-
-    <div id="sandboxModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
-        <div class="glass max-w-xl w-full rounded-2xl p-6 flex flex-col max-h-[80vh]">
-            <div class="flex justify-between items-center mb-2 border-b border-white/5 pb-2">
-                <span class="text-xs font-black text-indigo-400 uppercase flex items-center"><i data-feather="terminal" class="mr-2 w-4 h-4"></i> Sandbox Network Payload Response Object</span>
-                <button onclick="document.getElementById('sandboxModal').classList.add('hidden')" class="text-gray-400 hover:text-white"><i data-feather="x"></i></button>
-            </div>
-            <pre id="sandboxPre" class="bg-black/50 border border-white/5 p-4 rounded-xl text-emerald-400 text-[11px] overflow-auto flex-1 font-mono"></pre>
-        </div>
-    </div>
-
-    <div id="endpointModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
-        <div class="glass max-w-2xl w-full rounded-2xl p-6 flex flex-col max-h-[85vh]">
-            <div class="flex justify-between items-center mb-4 border-b border-white/5 pb-2">
-                <h3 class="font-black text-white tracking-wide text-xs uppercase flex items-center"><i data-feather="code" class="text-purple-400 mr-2 w-4 h-4"></i> Uniform Resource Interface Schema Dashboard</h3>
-                <button onclick="toggleModal(false)" class="text-gray-400 hover:text-white"><i data-feather="x"></i></button>
-            </div>
-            <p class="text-[11px] text-gray-400 mb-4">Click any structural code component endpoint below to copy it directly to your clipboard storage.</p>
-            <div id="modalList" class="space-y-2 overflow-y-auto flex-1 pr-1 font-mono text-[11px]"></div>
-        </div>
-    </div>
-
-    <script>
-        const toolsList = ["adv","paytm","imei","calltracer","upi","ifsc","number","pincode","ip","challan","ff","bgmi","snap","email","vehicle","git","insta","tg","tgidinfo","numleak","pan","adharfamily","aadhar","veh2num","bomber","pk","passport","driving","voter"];
-        let localKeysCache = {};
-
-        function initLocalStorageBackup() {
-            if(!localStorage.getItem('SHAYAN_BACKED_KEYS')) {
-                const defaultPool = {
-                    "SHAYAN-MASTER": { "name": "Master Enterprise Dev", "key": "SHAYAN-MASTER", "expire_date": "9999-12-31T23:59", "limit": 1000000, "used": 0, "status": "Active", "tools": ["all"] }
-                };
-                localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(defaultPool));
-            }
-        }
-
-        async function syncClientToServerFallback() {
-            initLocalStorageBackup();
-            const localPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
-            
-            try {
-                await fetch('/api/admin/keys/sync', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ keys: Object.values(localPool) })
-                });
-            } catch(err) { console.error("Sync Failure Intercepted: ", err); }
-            
-            fetchState();
-        }
-
-        function generateRandomKey() {
-            const hex = 'SHAYAN-' + Array.from({length:16}, () => Math.floor(Math.random()*16).toString(16)).join('').toUpperCase();
-            document.getElementById('apiKey').value = hex;
-        }
-
-        function initToolsCheckboxes() {
-            const grid = document.getElementById('toolsGrid');
-            const sandboxSelect = document.getElementById('sandboxTool');
-            grid.innerHTML = ''; sandboxSelect.innerHTML = '';
-            
-            toolsList.forEach(t => {
-                grid.innerHTML += `
-                    <div class="flex items-center space-x-2 bg-black/20 p-1.5 rounded-xl border border-white/5 hover:border-white/10">
-                        <input type="checkbox" value="${t}" id="chk-${t}" class="tool-chk accent-purple-600">
-                        <label for="chk-${t}" class="text-[11px] tracking-wide text-gray-300 font-medium capitalize cursor-pointer select-none">${t}</label>
-                    </div>`;
-                sandboxSelect.innerHTML += `<option value="${t}" class="bg-[#120b24] capitalize">${t.toUpperCase()} Service Module</option>`;
-            });
-        }
-
-        function toggleAllTools(src) {
-            const grid = document.getElementById('toolsGrid');
-            if(src.checked) { grid.classList.add('opacity-40', 'pointer-events-none'); } 
-            else { grid.classList.remove('opacity-40', 'pointer-events-none'); }
-        }
-
-        function toggleModal(open) {
-            const modal = document.getElementById('endpointModal');
-            modal.style.display = open ? 'flex' : 'none';
-            if(open) {
-                const host = window.location.origin;
-                const list = document.getElementById('modalList');
-                list.innerHTML = '';
-                toolsList.forEach(t => {
-                    let sampleParam = "num=9876543210";
-                    if(t === 'email') sampleParam = "email=test@gmail.com";
-                    else if(t === 'vehicle' || t === 'veh2num') sampleParam = "vehicle=MH02";
-                    else if(t === 'pan') sampleParam = "pan=ANXPV7978A";
-                    
-                    const sampleUrl = `${host}/api/${t}?key=YOUR_KEY&${sampleParam}`;
-                    list.innerHTML += `
-                        <div onclick="copyText('${sampleUrl}')" class="p-2.5 bg-black/40 hover:bg-purple-600/10 border border-white/5 hover:border-purple-500/30 rounded-xl cursor-pointer transition flex justify-between items-center group">
-                            <span class="text-purple-300 truncate mr-2">${sampleUrl}</span>
-                            <i data-feather="copy" class="w-3.5 h-3.5 text-gray-500 group-hover:text-purple-400 flex-shrink-0"></i>
-                        </div>`;
-                });
-                feather.replace();
-            }
-        }
-
-        function copyText(txt) {
-            navigator.clipboard.writeText(txt);
-            alert("Endpoint string copied successfully.");
-        }
-
-        async function fetchState() {
-            const res = await fetch('/api/admin/keys');
-            const data = await res.json();
-            
-            const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
-            data.forEach(k => { clientBackupPool[k.key] = k; });
-            localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
-
-            const finalRenderPool = Object.values(clientBackupPool);
-            document.getElementById('statTotalKeys').innerText = finalRenderPool.length;
-
-            const table = document.getElementById('keysTable');
-            table.innerHTML = '';
-            localKeysCache = {};
-
-            finalRenderPool.forEach(k => {
-                localKeysCache[k.key] = k;
-                const isAll = !k.tools || k.tools.length === 0 || k.tools.includes('all');
-                const badge = isAll ? 'GLOBAL' : `${k.tools.length} Tools`;
-                const isSuspended = k.status === 'Suspended';
-                const consumptionPercentage = Math.min(100, Math.round((k.used / k.limit) * 100) || 0);
-                
-                table.innerHTML += `
-                    <tr class="hover:bg-white/5 transition ${isSuspended ? 'opacity-30' : ''}">
-                        <td class="py-3 font-sans font-bold text-white pr-2">${k.name}</td>
-                        <td class="py-3 text-purple-400 font-bold text-[11px] pr-2">${k.key}</td>
-                        <td class="py-3 pr-2"><span class="px-2 py-0.5 rounded border text-[9px] font-bold ${isAll?'bg-emerald-500/10 text-emerald-400 border-emerald-500/20':'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}">${badge}</span></td>
-                        <td class="py-3 pr-2 w-32">
-                            <div class="text-[10px] text-gray-400 mb-1 flex justify-between"><span>${k.used}/${k.limit}</span> <span>${consumptionPercentage}%</span></div>
-                            <div class="w-full bg-white/10 h-1.5 rounded-full overflow-hidden">
-                                <div class="bg-gradient-to-r from-purple-500 to-indigo-500 h-full" style="width: ${consumptionPercentage}%"></div>
-                            </div>
-                        </td>
-                        <td class="py-3 text-gray-400 text-[11px] pr-2">${k.expire_date.includes('9999') ? 'LIFETIME' : k.expire_date.replace('T', ' ')}</td>
-                        <td class="py-3 pr-2"><span class="text-[10px] font-bold ${isSuspended?'text-rose-400':'text-emerald-400'}">${k.status.toUpperCase()}</span></td>
-                        <td class="py-3 text-right space-x-1 whitespace-nowrap">
-                            <button onclick="restartQuota('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-emerald-400 inline-block" title="Restart/Reset Quota Limit"><i data-feather="rotate-ccw" class="w-3.5 h-3.5"></i></button>
-                            <button onclick="toggleSuspend('${k.key}', '${k.status}')" class="p-1.5 rounded hover:bg-white/5 text-amber-400 inline-block" title="Play/Pause API Key Token"><i data-feather="${isSuspended?'play':'pause'}" class="w-3.5 h-3.5"></i></button>
-                            <button onclick="triggerEdit('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-blue-400 inline-block"><i data-feather="edit-3" class="w-3.5 h-3.5"></i></button>
-                            <button onclick="dropKey('${k.key}')" class="p-1.5 rounded hover:bg-white/5 text-rose-400 inline-block"><i data-feather="trash-2" class="w-3.5 h-3.5"></i></button>
-                        </td>
-                    </tr>`;
-            });
-            feather.replace();
-        }
-
-        async function restartQuota(keyId) {
-            if(confirm("Are you sure you want to restart/reset the request limit for this key?")) {
-                const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
-                if(clientBackupPool[keyId]) { clientBackupPool[keyId].used = 0; }
-                localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
-
-                await fetch('/api/admin/keys/restart', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ key: keyId })
-                });
-                fetchState();
-            }
-        }
-
-        async function fetchLogs() {
-            const res = await fetch('/api/admin/logs');
-            const data = await res.json();
-            const table = document.getElementById('logsTable');
-            
-            let successfulLogsCount = 0;
-            let failedLogsCount = 0;
-
-            if(data.length === 0) {
-                table.innerHTML = `<tr><td colspan="6" class="py-4 text-center text-gray-500 font-sans">Audit stream trace is currently empty.</td></tr>`;
-                return;
-            }
-
-            table.innerHTML = '';
-            data.forEach(l => {
-                if(l.status === "Success") successfulLogsCount++; else failedLogsCount++;
-                
-                table.innerHTML += `
-                    <tr class="hover:bg-white/5 transition log-row-item">
-                        <td class="py-2 text-gray-500 text-[11px]">${l.timestamp}</td>
-                        <td class="py-2 font-sans text-white">${l.key_name}</td>
-                        <td class="py-2 text-purple-400">${l.key}</td>
-                        <td class="py-2"><span class="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 rounded border border-blue-500/20 text-[10px] font-bold">${l.tool}</span></td>
-                        <td class="py-2 text-amber-300 max-w-[180px] truncate">${l.search}</td>
-                        <td class="py-2"><span class="text-emerald-400 font-bold">${l.status}</span></td>
-                    </tr>`;
-            });
-            
-            document.getElementById('statSuccess').innerText = successfulLogsCount;
-            document.getElementById('statFailed').innerText = failedLogsCount;
-        }
-
-        async function runSandboxTest() {
-            const tool = document.getElementById('sandboxTool').value;
-            const key = document.getElementById('sandboxKey').value;
-            const param = document.getElementById('sandboxParam').value;
-            if(!key || !param) return alert("Please fill up required inputs.");
-            
-            const localPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
-            if (localPool[key]) {
-                await fetch('/api/admin/keys', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(localPool[key])
-                });
-            }
-
-            const url = `/api/${tool}?key=${key}&num=${param}&email=${param}&vehicle=${param}&pan=${param}`;
-            document.getElementById('sandboxPre').innerText = "Querying live backend engine routes...";
-            document.getElementById('sandboxModal').classList.remove('hidden');
-            
-            try {
-                const r = await fetch(url);
-                const d = await r.json();
-                document.getElementById('sandboxPre').innerText = JSON.stringify(d, null, 4);
-                
-                if(r.status === 200 && d.status && d.status !== "error") {
-                    if(localPool[key]) { localPool[key].used = (localPool[key].used || 0) + 1; }
-                    localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(localPool));
-                }
-            } catch(e) {
-                document.getElementById('sandboxPre').innerText = "Exception Logged: " + e.toString();
-            }
-            fetchLogs();
-            fetchState();
-        }
-
-        function filterLogRows() {
-            const val = document.getElementById('logSearchInput').value.toLowerCase();
-            document.querySelectorAll('.log-row-item').forEach(r => {
-                r.style.display = r.innerText.toLowerCase().includes(val) ? '' : 'none';
-            });
-        }
-
-        function downloadLogsCSV() {
-            let csv = "Timestamp,Client Label,Token,Route Target,Query Search,Gateway Status\\n";
-            document.querySelectorAll('.log-row-item').forEach(r => {
-                const tds = Array.from(r.querySelectorAll('td')).map(td => td.innerText.replace(/,/g, ' '));
-                if(tds.length > 0) csv += tds.join(',') + "\\n";
-            });
-            const blob = new Blob([csv], { type: 'text/csv' });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = `Gateway_Streaming_Audit_Logs.csv`;
-            link.click();
-        }
-
-        function clearStreamingLogs() {
-            if(confirm("Flush all logs memory?")) {
-                fetch('/api/admin/logs', {method: 'POST'}).then(() => { fetchLogs(); });
-            }
-        }
-
-        function clearAllSystemKeys() {
-            if(confirm("Wipe custom user local storage matrix?")) {
-                localStorage.removeItem('SHAYAN_BACKED_KEYS');
-                initLocalStorageBackup();
-                fetchState();
-            }
-        }
-
-        document.getElementById('keyForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const isGlobal = document.getElementById('allToolsCheck').checked;
-            let selectedTools = ['all'];
-            
-            if(!isGlobal) {
-                selectedTools = Array.from(document.querySelectorAll('.tool-chk:checked')).map(c => c.value);
-                if(selectedTools.length === 0) { selectedTools = ['all']; }
-            }
-
-            const payloadObject = {
-                name: document.getElementById('clientName').value,
-                key: document.getElementById('apiKey').value,
-                limit: parseInt(document.getElementById('keyLimit').value),
-                expire_date: document.getElementById('keyExpire').value,
-                tools: selectedTools,
-                used: localKeysCache[document.getElementById('apiKey').value]?.used || 0,
-                status: localKeysCache[document.getElementById('apiKey').value]?.status || "Active"
-            };
-
-            const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
-            clientBackupPool[payloadObject.key] = payloadObject;
-            localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
-
-            await fetch('/api/admin/keys', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payloadObject)
-            });
-
-            resetFormState();
-            fetchState();
-        });
-
-        function triggerEdit(keyId) {
-            const k = localKeysCache[keyId];
-            if(!k) return;
-            document.getElementById('formTitle').innerHTML = `<i data-feather="edit" class="mr-2 w-4 h-4 text-blue-400"></i> Modify Active Token Profile`;
-            document.getElementById('clientName').value = k.name;
-            document.getElementById('apiKey').value = k.key;
-            document.getElementById('apiKey').readOnly = true;
-            document.getElementById('keyLimit').value = k.limit;
-            document.getElementById('keyExpire').value = k.expire_date;
-            
-            const isAll = !k.tools || k.tools.length === 0 || k.tools.includes('all');
-            document.getElementById('allToolsCheck').checked = isAll;
-            toggleAllTools({checked: isAll});
-            document.querySelectorAll('.tool-chk').forEach(chk => { chk.checked = !isAll && k.tools && k.tools.includes(chk.value); });
-            document.getElementById('cancelEditBtn').classList.remove('hidden');
-            document.getElementById('submitBtn').innerText = "SAVE MODIFICATIONS";
-            feather.replace();
-        }
-
-        function resetFormState() {
-            document.getElementById('formTitle').innerHTML = `<i data-feather="plus-circle" class="mr-2 w-4 h-4"></i> Provision Token Strategy`;
-            document.getElementById('keyForm').reset();
-            document.getElementById('apiKey').readOnly = false;
-            document.getElementById('keyExpire').value = "9999-12-31T23:59";
-            toggleAllTools({checked: true});
-            document.getElementById('cancelEditBtn').classList.add('hidden');
-            document.getElementById('submitBtn').innerText = "PROVISION ACCESS";
-            feather.replace();
-        }
-
-        async function toggleSuspend(keyId, currentStatus) {
-            const newStatus = currentStatus === 'Active' ? 'Suspended' : 'Active';
-            const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
-            if(clientBackupPool[keyId]) clientBackupPool[keyId].status = newStatus;
-            localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
-
-            await fetch('/api/admin/keys/status', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ key: keyId, status: newStatus })
-            });
-            fetchState();
-        }
-
-        async function dropKey(keyId) {
-            if(confirm("Permanently wipe this routing token?")) {
-                const clientBackupPool = JSON.parse(localStorage.getItem('SHAYAN_BACKED_KEYS') || '{}');
-                delete clientBackupPool[keyId];
-                localStorage.setItem('SHAYAN_BACKED_KEYS', JSON.stringify(clientBackupPool));
-
-                await fetch(`/api/admin/keys/delete/${keyId}`, { method: 'DELETE' });
-                fetchState();
-            }
-        }
-
-        initLocalStorageBackup();
-        initToolsCheckboxes();
-        syncClientToServerFallback();
-        setInterval(fetchLogs, 3000);
-        setTimeout(() => { feather.replace(); }, 500);
-    </script>
-</body>
-</html>
-"""
-
-def check_key_validity(api_key, tool_name):
-    if api_key not in DB["keys"]:
-        return False, "DEHYDRATED_KEY_DETECTED"
-        
-    key_data = DB["keys"][api_key]
+# --- REVERSE PROXY GATEWAY ROUTE ---
+@app.get("/gateway/{tool_id}")
+async def gateway_router(tool_id: str, request: Request):
+    query_params = dict(request.query_params)
+    user_key = query_params.get("key")
     
-    # 1. प्ले-पॉज लॉजिक: अगर सस्पेंडेड है तो ब्लॉक करें
-    if key_data.get("status", "Active") == "Suspended":
-        return False, "This API access footprint has been explicitly paused/suspended by administrator."
-        
-    # 2. लाइफटाइम / एक्सपायरी वेरिफिकेशन
-    try:
-        expire_dt = parser.parse(key_data["expire_date"])
-        if datetime.now() > expire_dt:
-            return False, f"API Key expired automatically on {key_data['expire_date']}."
-    except Exception:
-        return False, "System runtime token configuration parse exception."
-        
-    # 3. लिमिट फिनिश्ड होने का प्रॉम्प्ट मैकेनिज्म
-    if int(key_data["used"]) >= int(key_data["limit"]):
-        return False, f"The API limit is finished. If you want to buy more API access, please purchase from our official channel: {TELEGRAM_CHANNEL_LINK}"
-        
-    allowed_tools = key_data.get("tools", [])
+    if not user_key or user_key not in api_keys_db:
+        raise HTTPException(status_code=403, detail="Invalid API Key")
     
-    # 4. स्ट्रिक्ट री-इन्फोर्समेंट चक्र: अगर लिस्ट खाली है या 'all' है, तो सीधे अनुमति दें
-    if not allowed_tools or len(allowed_tools) == 0 or "all" in allowed_tools:
-        return True, key_data
-        
-    if tool_name not in allowed_tools:
-        # किसी भी स्थिति में फेल होने से बचाने के लिए डिफ़ॉल्ट रूप से अनुमति को ट्रिगर करें
-        return True, key_data
-        
-    return True, key_data
-
-def sanitize_payload(data):
-    banned = ["@ftgamer2", "@bornex", "Ultra", "ft-osint", "duckdns", "ft-rahun2m"]
-    try:
-        if isinstance(data, dict):
-            cleaned_dict = {}
-            for k, v in data.items():
-                if any(b in str(k) for b in banned):
-                    continue
-                cleaned_dict[k] = sanitize_payload(v)
-            return cleaned_dict
-        elif isinstance(data, list):
-            return [sanitize_payload(i) for i in data]
-        elif isinstance(data, str):
-            if "https://t.me/lynx_api" in data:
-                data = data.replace("https://t.me/lynx_api", TELEGRAM_CHANNEL_LINK)
-            for b in banned:
-                data = data.replace(b, "SHAYAN_EXPLORER")
-            return data
-    except Exception:
-        return data
-    return data
-
-@app.route('/')
-def dashboard():
-    return render_template_string(HTML_DASHBOARD)
-
-@app.route('/api/admin/keys', methods=['GET', 'POST'])
-def handle_keys():
-    if request.method == 'POST':
-        data = request.json or {}
-        key_id = data.get('key')
-        if not key_id:
-            return jsonify({"status": "error", "message": "Key code is mandatory"}), 400
-        
-        tools_payload = data.get('tools', ['all'])
-        if not tools_payload or len(tools_payload) == 0:
-            tools_payload = ['all']
-
-        # डेटा डिक्शनरी में इंजेक्ट करने से पहले उसे सैनिटाइज और फोर्स 'all' असाइन करें
-        DB["keys"][key_id] = {
-            "name": data.get('name', 'Client Target Profile'),
-            "key": key_id,
-            "expire_date": data.get('expire_date', '9999-12-31T23:59'),
-            "limit": int(data.get('limit', 500)),
-            "used": int(data.get('used', DB["keys"].get(key_id, {}).get("used", 0))),
-            "status": data.get('status', DB["keys"].get(key_id, {}).get("status", "Active")),
-            "tools": ["all"]  # एरर को रोकने के लिए हमेशा 'all' रखें
-        }
-        return jsonify({"status": "success"})
-    return jsonify(list(DB["keys"].values()))
-
-@app.route('/api/admin/keys/restart', methods=['POST'])
-def restart_key_limit():
-    data = request.json or {}
-    key_id = data.get('key')
-    if key_id in DB["keys"]:
-        DB["keys"][key_id]["used"] = 0
-        return jsonify({"status": "success", "message": "Limit restarted successfully."})
-    return jsonify({"status": "error", "message": "Key not found."}), 404
-
-@app.route('/api/admin/keys/sync', methods=['POST'])
-def sync_all_keys():
-    data = request.json or {}
-    received_keys = data.get('keys', [])
-    for k in received_keys:
-        key_id = k.get('key')
-        if key_id:
-            if key_id not in DB["keys"]:
-                DB["keys"][key_id] = k
-                DB["keys"][key_id]["tools"] = ["all"]
-            else:
-                DB["keys"][key_id]["name"] = k.get("name", DB["keys"][key_id]["name"])
-                DB["keys"][key_id]["limit"] = k.get("limit", DB["keys"][key_id]["limit"])
-                DB["keys"][key_id]["expire_date"] = k.get("expire_date", DB["keys"][key_id]["expire_date"])
-                DB["keys"][key_id]["used"] = k.get("used", DB["keys"][key_id]["used"])
-                DB["keys"][key_id]["status"] = k.get("status", DB["keys"][key_id]["status"])
-                DB["keys"][key_id]["tools"] = ["all"]
-    return jsonify({"status": "success", "synced_count": len(received_keys)})
-
-@app.route('/api/admin/keys/status', methods=['POST'])
-def change_status():
-    data = request.json or {}
-    key_id = data.get('key')
-    new_status = data.get('status')
-    if key_id in DB["keys"]:
-        DB["keys"][key_id]["status"] = new_status
-        return jsonify({"status": "success"})
-    return jsonify({"status": "error", "message": "Token not found"}), 404
-
-@app.route('/api/admin/keys/delete/<key_id>', methods=['DELETE'])
-def drop_key(key_id):
-    if key_id in DB["keys"]:
-        del DB["keys"][key_id]
-        return jsonify({"status": "success"})
-    return jsonify({"status": "error"}), 404
-
-@app.route('/api/admin/logs', methods=['GET', 'POST'])
-def handle_logs():
-    if request.method == 'POST':
-        DB["logs"] = []
-        return jsonify({"status": "success"})
-    return jsonify(DB["logs"])
-
-@app.route('/api/<tool>', methods=['GET'])
-def proxy_gateway(tool):
-    if tool not in SUPPORTED_TOOLS:
-        return jsonify({"status": "error", "developer": "SHAYAN_EXPLORER", "message": "Invalid Route."}), 404
-    user_key = request.args.get('key')
-    if not user_key:
-        return jsonify({"status": "error", "developer": "SHAYAN_EXPLORER", "message": "Missing key parameters."}), 401
+    key_data = api_keys_db[user_key]
     
-    is_valid, result = check_key_validity(user_key, tool)
-    
-    if not is_valid and result == "DEHYDRATED_KEY_DETECTED":
-        return jsonify({
-            "status": "error",
-            "developer": "SHAYAN_EXPLORER",
-            "message": "Gateway session synchronized. Please execute your network request again from the dashboard to auto-authenticate."
-        }), 426
-
-    if not is_valid:
-        return jsonify({"status": "error", "developer": "SHAYAN_EXPLORER", "message": result}), 403
-
-    key_data = result
-    search_query = "Dynamic Data Request"
-    
-    for param in ['num', 'email', 'vehicle', 'username', 'uid', 'id', 'upi', 'ifsc', 'imei', 'ip', 'pin', 'info', 'pan']:
-        if request.args.get(param):
-            search_query = f"{param}: {request.args.get(param)}"
-            break
-
-    upstream_params = dict(request.args)
-    upstream_params['key'] = UPSTREAM_DEFAULT_KEY
-
-    try:
-        response = requests.get(f"{TARGET_API_BASE}/{tool}", params=upstream_params, timeout=12)
-        try:
-            response_data = sanitize_payload(response.json())
-        except ValueError:
-            response_data = {"data": sanitize_payload(response.text)}
-    except Exception as e:
-        response_data = {"status": "error", "message": f"Link failure: {str(e)}"}
-
-    if response.status_code == 200:
-        key_data["used"] = int(key_data.get("used", 0)) + 1
+    # Check Suspension
+    if key_data["status"] == "suspended":
+        raise HTTPException(status_code=403, detail="API Key is suspended")
         
-    DB["logs"].insert(0, {
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    # Check Expiry
+    expiry = datetime.datetime.strptime(key_data["expiry"], "%Y-%m-%d").date()
+    if datetime.date.today() > expiry:
+        raise HTTPException(status_code=403, detail="API Key has expired")
+        
+    # Check Limit
+    if key_data["uses"] >= key_data["limit"]:
+        raise HTTPException(status_code=429, detail="API Key request limit reached")
+        
+    # Check Tool Permissions
+    if "all" not in key_data["tools"] and tool_id not in key_data["tools"]:
+        raise HTTPException(status_code=403, detail="This key is not authorized to use this specific tool")
+
+    # Find the parameter name for logging
+    tool_config = next((t for t in TOOLS_LIST if t["id"] == tool_id), None)
+    search_query = "Unknown Query"
+    if tool_config:
+        search_query = query_params.get(tool_config["param"], "N/A")
+
+    # Log the search
+    search_logs.append({
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "key_name": key_data["name"],
         "key": user_key,
-        "tool": tool.upper(),
-        "search": search_query,
-        "status": "Success" if response.status_code == 200 else "Failed"
+        "tool": tool_id,
+        "query": search_query
     })
+    
+    # Increment Usage
+    key_data["uses"] += 1
+    
+    # Forward to Upstream API safely
+    target_tool = next((t for t in TOOLS_LIST if t["id"] == tool_id), None)
+    if not target_tool:
+        raise HTTPException(status_code=404, detail="Tool Endpoint Not Found")
+        
+    forward_params = query_params.copy()
+    forward_params["key"] = DEFAULT_UPSTREAM_KEY # Inject master key silently
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(f"{BASE_TARGET_URL}/{tool_id}", params=forward_params, timeout=10.0)
+            return JSONResponse(status_code=response.status_code, content=response.json())
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": "Upstream error or timeout", "details": str(e)})
 
-    if isinstance(response_data, dict):
-        response_data["developer"] = "SHAYAN_EXPLORER"
-        if "status" not in response_data:
-            response_data["status"] = "SUCCESS"
+# --- ADMIN API ENDPOINTS ---
+@app.post("/api/admin/login")
+def admin_login(data: LoginRequest):
+    if data.username == ADMIN_USER and data.password == ADMIN_PASS:
+        return {"status": "success"}
+    raise HTTPException(status_code=401, detail="Unauthorized")
 
-    return jsonify(response_data), response.status_code
+@app.get("/api/admin/data")
+def get_admin_data():
+    return {
+        "keys": list(api_keys_db.values()),
+        "logs": search_logs[-100:],  # Return last 100 entries
+        "tools": TOOLS_LIST
+    }
 
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+@app.post("/api/admin/keys")
+def create_key(data: KeyGenRequest):
+    if data.custom_key in api_keys_db:
+        raise HTTPException(status_code=400, detail="Key already exists")
+    
+    api_keys_db[data.custom_key] = {
+        "name": data.key_name,
+        "key": data.custom_key,
+        "limit": data.daily_limit,
+        "uses": 0,
+        "expiry": data.expiry_date,
+        "tools": data.allowed_tools,
+        "status": "active"
+    }
+    return {"status": "created"}
+
+@app.post("/api/admin/keys/{key_id}/action")
+def modify_key(key_id: str, action: dict):
+    if key_id not in api_keys_db:
+        raise HTTPException(status_code=404, detail="Key not found")
+    
+    act_type = action.get("type")
+    if act_type == "delete":
+        del api_keys_db[key_id]
+    elif act_type == "suspend":
+        api_keys_db[key_id]["status"] = "suspended"
+    elif act_type == "activate":
+        api_keys_db[key_id]["status"] = "active"
+    elif act_type == "restart_limit":
+        api_keys_db[key_id]["uses"] = 0
+    elif act_type == "edit":
+        api_keys_db[key_id]["limit"] = action.get("limit")
+        api_keys_db[key_id]["expiry"] = action.get("expiry")
+    return {"status": "updated"}
+
+# --- RENDER FRONTEND ---
+@app.get("/", response_class=HTMLResponse)
+def index_page():
+    return """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>SHAYAN_EXPLORER // CENTRAL API COMMAND</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;800&family=Space+Grotesk:wght@400;700&display=swap" rel="stylesheet">
+        <style>
+            body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #050508; }
+            .mono { font-family: 'Space Grotesk', sans-serif; }
+            .glow-border { border: 1px solid rgba(139, 92, 246, 0.2); box-shadow: 0 0 15px rgba(139, 92, 246, 0.05); }
+            .glow-border:hover { border-color: rgba(139, 92, 246, 0.6); box-shadow: 0 0 20px rgba(139, 92, 246, 0.2); }
+            .cyber-badge { background: linear-gradient(90deg, #c084fc, #6366f1); }
+        </style>
+    </head>
+    <body class="text-slate-100 min-h-screen selection:bg-indigo-500 selection:text-white">
+
+        <!-- LOGIN MODAL -->
+        <div id="loginView" class="fixed inset-0 bg-[#050508] z-50 flex items-center justify-center p-4">
+            <div class="w-full max-w-md bg-[#0b0c14] border border-slate-800 rounded-2xl p-8 shadow-2xl">
+                <div class="mb-8 text-center">
+                    <span class="text-xs uppercase tracking-widest text-indigo-400 font-bold mono">Secure Gateway v4.0</span>
+                    <h1 class="text-3xl font-extrabold text-white mt-1">SHAYAN_EXPLORER</h1>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs uppercase tracking-wider text-slate-400 mb-1 font-semibold">Admin Identity</label>
+                        <input id="admUser" type="text" class="w-full bg-[#121424] border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 transition-all" placeholder="Enter identity ID">
+                    </div>
+                    <div>
+                        <label class="block text-xs uppercase tracking-wider text-slate-400 mb-1 font-semibold">Passphrase</label>
+                        <input id="admPass" type="password" class="w-full bg-[#121424] border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 transition-all" placeholder="••••••••">
+                    </div>
+                    <button onclick="attemptLogin()" class="w-full bg-indigo-600 hover:bg-indigo-500 active:scale-[0.99] text-white font-semibold py-3 px-4 rounded-xl transition-all shadow-lg shadow-indigo-600/20 mt-2">
+                        Initialize Terminal
+                    </button>
+                    <p id="loginErr" class="text-xs text-rose-400 mt-2 hidden text-center mono">Authentication failure. Vector denied.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- MAIN TERMINAL APP -->
+        <div id="appView" class="hidden min-h-screen flex flex-col">
+            <!-- Top Navigation Banner -->
+            <header class="border-b border-slate-900 bg-[#07080f]/80 backdrop-blur-md sticky top-0 z-40 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                    <div class="h-3 w-3 rounded-full bg-emerald-500 animate-pulse"></div>
+                    <span class="font-bold tracking-tight text-lg text-white">SHAYAN_EXPLORER <span class="text-indigo-400 text-xs px-2 py-0.5 rounded border border-indigo-500/20 bg-indigo-500/5 ml-1">ADMIN CONTROL</span></span>
+                </div>
+                
+                <div class="flex items-center gap-3">
+                    <button onclick="toggleEndpoints()" class="text-xs font-semibold px-4 py-2 bg-[#111322] border border-slate-800 hover:border-slate-700 rounded-xl transition-all">
+                        📋 View Raw Endpoints (No Key)
+                    </button>
+                </div>
+            </header>
+
+            <!-- RAW ENDPOINTS ACCORDION -->
+            <div id="endpointsDrawer" class="hidden bg-[#0a0b12] border-b border-slate-900 p-6">
+                <div class="max-w-7xl mx-auto">
+                    <h3 class="text-sm font-bold uppercase tracking-wider text-indigo-400 mb-3 mono">Available Proxy Endpoints (Click URL to copy)</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3" id="rawUrlsList"></div>
+                </div>
+            </div>
+
+            <main class="flex-1 p-6 max-w-7xl w-full mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Left Dashboard: Management Interface -->
+                <div class="lg:col-span-1 space-y-6">
+                    <!-- Key Provisioning Container -->
+                    <div class="bg-[#070810] border border-slate-900 rounded-2xl p-6">
+                        <h2 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                            <span>🔑</span> Provision API Key
+                        </h2>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-xs uppercase text-slate-400 mb-1 font-semibold">Key Identifier / Name</label>
+                                <input id="keyName" type="text" placeholder="e.g., Premium User Client" class="w-full bg-[#111322] border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs uppercase text-slate-400 mb-1 font-semibold">Custom Dynamic Key</label>
+                                <input id="keyString" type="text" placeholder="e.g., client-xyz-2026" class="w-full bg-[#111322] border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500">
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block text-xs uppercase text-slate-400 mb-1 font-semibold">Request Limit</label>
+                                    <input id="keyLimit" type="number" value="1000" class="w-full bg-[#111322] border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs uppercase text-slate-400 mb-1 font-semibold">Expiry Date</label>
+                                    <input id="keyExpiry" type="date" class="w-full bg-[#111322] border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500">
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label class="block text-xs uppercase text-slate-400 mb-2 font-semibold">Scope Restrictions</label>
+                                <div class="flex gap-2 mb-3">
+                                    <button id="toolScopeAll" onclick="setScopeMode('all')" class="flex-1 py-1.5 rounded-lg text-xs font-bold border border-indigo-500 bg-indigo-500/10 text-indigo-400">All Tools</button>
+                                    <button id="toolScopeSpec" onclick="setScopeMode('spec')" class="flex-1 py-1.5 rounded-lg text-xs font-bold border border-slate-800 bg-[#111322] text-slate-400">Specific Select</button>
+                                </div>
+                                <div id="specificToolsGrid" class="hidden grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-2 bg-[#0c0d17] rounded-xl border border-slate-900">
+                                    <!-- Populated programmatically -->
+                                </div>
+                            </div>
+
+                            <button onclick="generateKey()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2.5 px-4 rounded-xl text-sm transition-all shadow-lg mt-2">
+                                Authorize Key Allocation
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Dashboard: Active Assets & Key Logs -->
+                <div class="lg:col-span-2 space-y-6">
+                    <!-- Keys Management List -->
+                    <div class="bg-[#070810] border border-slate-900 rounded-2xl p-6">
+                        <h2 class="text-lg font-bold text-white mb-4">Active System Allocations</h2>
+                        <div class="space-y-3 max-h-[400px] overflow-y-auto pr-1" id="keysContainer">
+                            <!-- Keys populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Live Query Inspection Stream -->
+                    <div class="bg-[#070810] border border-slate-900 rounded-2xl p-6">
+                        <h2 class="text-lg font-bold text-white mb-4 flex items-center justify-between">
+                            <span>📋 Vector Search Telemetry Logs</span>
+                            <span class="text-xs uppercase bg-[#111322] border border-slate-800 px-3 py-1 rounded-full text-slate-400 mono">Real-Time Sync</span>
+                        </h2>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-xs">
+                                <thead>
+                                    <tr class="border-b border-slate-900 text-slate-400 font-mono">
+                                        <th class="py-2">Timestamp</th>
+                                        <th class="py-2">Key Label</th>
+                                        <th class="py-2">Tool Executed</th>
+                                        <th class="py-2">Target Query</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="logsTableBody" class="divide-y divide-slate-900 text-slate-300 mono">
+                                    <!-- Logs items populate here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <script>
+            let currentScopeMode = 'all';
+            let globalToolsList = [];
+
+            // Set default date for calendar entry
+            document.getElementById('keyExpiry').value = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+
+            async function attemptLogin() {
+                const username = document.getElementById('admUser').value;
+                const password = document.getElementById('admPass').value;
+                
+                const res = await fetch('/api/admin/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ username, password })
+                });
+
+                if (res.ok) {
+                    document.getElementById('loginView').classList.add('hidden');
+                    document.getElementById('appView').classList.remove('hidden');
+                    refreshTelemetry();
+                    setInterval(refreshTelemetry, 4000); // Polling update metrics loop
+                } else {
+                    document.getElementById('loginErr').classList.remove('hidden');
+                }
+            }
+
+            function setScopeMode(mode) {
+                currentScopeMode = mode;
+                const allBtn = document.getElementById('toolScopeAll');
+                const specBtn = document.getElementById('toolScopeSpec');
+                const grid = document.getElementById('specificToolsGrid');
+
+                if(mode === 'all') {
+                    allBtn.className = "flex-1 py-1.5 rounded-lg text-xs font-bold border border-indigo-500 bg-indigo-500/10 text-indigo-400";
+                    specBtn.className = "flex-1 py-1.5 rounded-lg text-xs font-bold border border-slate-800 bg-[#111322] text-slate-400";
+                    grid.classList.add('hidden');
+                } else {
+                    specBtn.className = "flex-1 py-1.5 rounded-lg text-xs font-bold border border-indigo-500 bg-indigo-500/10 text-indigo-400";
+                    allBtn.className = "flex-1 py-1.5 rounded-lg text-xs font-bold border border-slate-800 bg-[#111322] text-slate-400";
+                    grid.classList.remove('hidden');
+                }
+            }
+
+            function toggleEndpoints() {
+                const drawer = document.getElementById('endpointsDrawer');
+                drawer.classList.toggle('hidden');
+            }
+
+            function copyToClipboard(text) {
+                navigator.clipboard.writeText(text);
+                alert("Copied Endpoint Target Route successfully.");
+            }
+
+            async function refreshTelemetry() {
+                const res = await fetch('/api/admin/data');
+                const data = await res.json();
+                
+                globalToolsList = data.tools;
+                
+                // Populate Tools Checkbox Grid if empty
+                const grid = document.getElementById('specificToolsGrid');
+                if(!grid.children.length) {
+                    grid.innerHTML = data.tools.map(t => `
+                        <label class="flex items-center gap-2 p-1.5 rounded border border-slate-900 bg-[#070810] text-[11px] text-slate-300 cursor-pointer hover:border-slate-800">
+                            <input type="checkbox" value="${t.id}" class="accent-indigo-500">
+                            <span class="truncate">${t.name}</span>
+                        </label>
+                    `).join('');
+                }
+
+                // Render Raw URLs Header list
+                const rawList = document.getElementById('rawUrlsList');
+                const hostUrl = window.location.origin;
+                rawList.innerHTML = data.tools.map(t => `
+                    <div onclick="copyToClipboard('${hostUrl}/gateway/${t.id}?key=YOUR_KEY&${t.param}=')" class="p-2.5 bg-[#07080f] border border-slate-800 hover:border-indigo-500/50 rounded-xl cursor-pointer text-xs truncate transition-all font-mono">
+                        <span class="text-indigo-400 font-bold">[${t.id.toUpperCase()}]</span><br>
+                        <span class="text-slate-400">${hostUrl}/gateway/${t.id}</span>
+                    </div>
+                `).join('');
+
+                // Render Keys
+                const keysContainer = document.getElementById('keysContainer');
+                if(data.keys.length === 0) {
+                    keysContainer.innerHTML = `<p class="text-xs text-slate-500 py-4 text-center mono">No active token systems configured.</p>`;
+                } else {
+                    keysContainer.innerHTML = data.keys.map(k => {
+                        const statusColor = k.status === 'active' ? 'text-emerald-400 border-emerald-500/20 bg-emerald-500/5' : 'text-rose-400 border-rose-500/20 bg-rose-500/5';
+                        return `
+                        <div class="p-4 bg-[#0a0b12] border border-slate-900 rounded-xl space-y-3">
+                            <div class="flex items-start justify-between">
+                                <div>
+                                    <h4 class="font-bold text-sm text-white">${k.name}</h4>
+                                    <p class="text-xs font-mono text-indigo-300 select-all bg-[#111322] px-2 py-0.5 rounded border border-slate-800 inline-block mt-1">${k.key}</p>
+                                </div>
+                                <span class="text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${statusColor}">${k.status}</span>
+                            </div>
+                            <div class="grid grid-cols-3 gap-2 text-[11px] text-slate-400 mono">
+                                <div>Usage: <span class="text-white font-bold">${k.uses} / ${k.limit}</span></div>
+                                <div>Expiry: <span class="text-white font-bold">${k.expiry}</span></div>
+                                <span class="truncate">Scope: ${k.tools.join(', ')}</span>
+                            </div>
+                            <div class="flex flex-wrap gap-1.5 pt-1 border-t border-slate-900/50">
+                                <button onclick="keyAction('${k.key}', 'restart_limit')" class="text-[10px] bg-slate-900 border border-slate-800 text-slate-300 px-2 py-1 rounded hover:bg-slate-800">Reset Limit</button>
+                                ${k.status === 'active' ? 
+                                    `<button onclick="keyAction('${k.key}', 'suspend')" class="text-[10px] bg-amber-500/10 border border-amber-500/20 text-amber-400 px-2 py-1 rounded hover:bg-amber-500/20">Suspend</button>` :
+                                    `<button onclick="keyAction('${k.key}', 'activate')" class="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2 py-1 rounded hover:bg-emerald-500/20">Activate</button>`
+                                }
+                                <button onclick="promptEdit('${k.key}', ${k.limit}, '${k.expiry}')" class="text-[10px] bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 px-2 py-1 rounded hover:bg-indigo-500/20">Edit Parameters</button>
+                                <button onclick="keyAction('${k.key}', 'delete')" class="text-[10px] bg-rose-500/10 border border-rose-500/20 text-rose-400 px-2 py-1 rounded hover:bg-rose-500/20 ml-auto">Terminate</button>
+                            </div>
+                        </div>
+                        `;
+                    }).join('');
+                }
+
+                // Render Logs
+                const logsBody = document.getElementById('logsTableBody');
+                if(data.logs.length === 0) {
+                    logsBody.innerHTML = `<tr><td colspan="4" class="py-4 text-center text-slate-600">No active operational logs.</td></tr>`;
+                } else {
+                    logsBody.innerHTML = data.logs.reverse().map(l => `
+                        <tr>
+                            <td class="py-2 text-slate-500">${l.timestamp}</td>
+                            <td class="py-2 text-slate-300 font-semibold">${l.key_name}</td>
+                            <td class="py-2 text-indigo-400 font-bold">[${l.tool.toUpperCase()}]</td>
+                            <td class="py-2 text-slate-400">${l.query}</td>
+                        </tr>
+                    `).join('');
+                }
+            }
+
+            async function generateKey() {
+                const key_name = document.getElementById('keyName').value;
+                const custom_key = document.getElementById('keyString').value;
+                const daily_limit = parseInt(document.getElementById('keyLimit').value);
+                const expiry_date = document.getElementById('keyExpiry').value;
+
+                if(!key_name || !custom_key) return alert("Provide label and payload signature configurations.");
+
+                let allowed_tools = ['all'];
+                if(currentScopeMode === 'spec') {
+                    const checked = Array.from(document.querySelectorAll('#specificToolsGrid input:checked')).map(el => el.value);
+                    if(checked.length === 0) return alert("Select at least one active API pipeline authorization.");
+                    allowed_tools = checked;
+                }
+
+                const res = await fetch('/api/admin/keys', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ key_name, custom_key, daily_limit, expiry_date, allowed_tools })
+                });
+
+                if(res.ok) {
+                    document.getElementById('keyName').value = '';
+                    document.getElementById('keyString').value = '';
+                    refreshTelemetry();
+                } else {
+                    const err = await res.json();
+                    alert(err.detail || "Allocation pipeline clash.");
+                }
+            }
+
+            async function keyAction(keyId, actionType) {
+                await fetch(`/api/admin/keys/${keyId}/action`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ type: actionType })
+                });
+                refreshTelemetry();
+            }
+
+            function promptEdit(keyId, oldLimit, oldExpiry) {
+                const newLimit = prompt("Set new Total Request Allocation Limit:", oldLimit);
+                if (newLimit === null) return;
+                const newExpiry = prompt("Set new system expiration format (YYYY-MM-DD):", oldExpiry);
+                if (newExpiry === null) return;
+
+                fetch(`/api/admin/keys/${keyId}/action`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ type: 'edit', limit: parseInt(newLimit), expiry: newExpiry })
+                }).then(() => refreshTelemetry());
+            }
+        </script>
+    </body>
+    </html>
+    """
