@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request, HTTPException, Depends, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-# Initialize FastAPI with correct Vercel endpoint targeting
+# Initialize FastAPI instance
 app = FastAPI(title="SHAYAN_EXPLORER API Gateway")
 
 # Configuration Definitions
@@ -18,7 +18,7 @@ DEFAULT_UPSTREAM_KEY = "vx-osint"
 api_keys_db: Dict[str, dict] = {}
 search_logs: List[dict] = []
 
-# Tools Blueprint Catalog
+# Expanded Tools Blueprint Catalog
 TOOLS_LIST = [
     {"id": "adv", "name": "Advanced Lookup", "param": "num"},
     {"id": "paytm", "name": "Paytm Lookup", "param": "num"},
@@ -40,6 +40,15 @@ TOOLS_LIST = [
     {"id": "tg", "name": "Telegram Username to Num", "param": "info"},
     {"id": "tgidinfo", "name": "Telegram ID to Num", "param": "id"},
     {"id": "numleak", "name": "Number Leak Database", "param": "num"},
+    # Newly Added Endpoints
+    {"id": "pk", "name": "PK Database Lookup", "param": "num"},
+    {"id": "name", "name": "Identity Name Search", "param": "name"},
+    {"id": "aadhar", "name": "UID Verification System", "param": "num"},
+    {"id": "numtoupi", "name": "Number to UPI Mapping", "param": "num"},
+    {"id": "pan", "name": "PAN Verification Check", "param": "pan"},
+    {"id": "veh2num", "name": "Vehicle to Mobile Mapping", "param": "vehicle"},
+    {"id": "adharfamily", "name": "Family Struct Verification", "param": "num"},
+    {"id": "bomber", "name": "Verification SMS Engine", "param": "number"},
 ]
 
 class LoginRequest(BaseModel):
@@ -82,7 +91,7 @@ async def gateway_router(tool_id: str, request: Request):
     if tool_config:
         search_query = query_params.get(tool_config["param"], "N/A")
 
-    # Add query verification tracking log
+    # Tracking log allocation entry
     search_logs.append({
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "key_name": key_data["name"],
@@ -165,7 +174,7 @@ def index_page():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>SHAYAN_EXPLORER // DASHBOARD SYSTEM</title>
+        <title>SHAYAN_EXPLORER // CONTROL SUITE</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;800&family=Space+Grotesk:wght@400;700&display=swap" rel="stylesheet">
         <style>
@@ -180,7 +189,7 @@ def index_page():
         <div id="loginView" class="fixed inset-0 bg-[#040406] z-50 flex items-center justify-center p-4">
             <div class="w-full max-w-md bg-[#0a0b12] border border-slate-900 rounded-2xl p-8 shadow-2xl">
                 <div class="mb-8 text-center">
-                    <span class="text-xs uppercase tracking-widest text-indigo-400 font-bold mono">Central Command Control</span>
+                    <span class="text-xs uppercase tracking-widest text-indigo-400 font-bold mono">Developed by @vernexzzz</span>
                     <h1 class="text-3xl font-extrabold text-white mt-1">SHAYAN_EXPLORER</h1>
                 </div>
                 <div class="space-y-4">
@@ -205,11 +214,14 @@ def index_page():
             <header class="border-b border-slate-900 bg-[#07080f]/90 backdrop-blur-md sticky top-0 z-40 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
                 <div class="flex items-center gap-3">
                     <div class="h-3 w-3 rounded-full bg-indigo-500 animate-pulse"></div>
-                    <span class="font-bold tracking-tight text-lg text-white">SHAYAN_EXPLORER <span class="text-indigo-400 text-xs px-2 py-0.5 rounded border border-indigo-500/20 bg-indigo-500/5 ml-1">PORTAL GATEWAY</span></span>
+                    <span class="font-bold tracking-tight text-lg text-white">SHAYAN_EXPLORER <span class="text-indigo-400 text-xs px-2 py-0.5 rounded border border-indigo-500/20 bg-indigo-500/5 ml-1">BY @VERNEXZZZ</span></span>
                 </div>
-                <div>
+                <div class="flex items-center gap-3">
+                    <a href="https://t.me/shayan_explorer_channel" target="_blank" class="text-xs font-bold text-indigo-400 hover:underline bg-indigo-500/5 border border-indigo-500/20 px-3 py-2 rounded-xl transition-all">
+                        📢 Official Channel Link
+                    </a>
                     <button onclick="toggleEndpoints()" class="text-xs font-semibold px-4 py-2 bg-[#111322] border border-slate-800 hover:border-slate-700 rounded-xl transition-all">
-                        📋 Live API Endpoints Structure (Copy Box)
+                        📋 Live Proxy Architecture URIs
                     </button>
                 </div>
             </header>
@@ -255,7 +267,7 @@ def index_page():
                                     <button id="toolScopeSpec" onclick="setScopeMode('spec')" class="flex-1 py-1.5 rounded-lg text-xs font-bold border border-slate-800 bg-[#121324] text-slate-400">Isolate Specific Tools</button>
                                 </div>
                                 <div id="specificToolsGrid" class="hidden grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-2 bg-[#0a0b12] rounded-xl border border-slate-900">
-                                    <!-- Dynamic elements check checkboxes -->
+                                    <!-- Dynamic checkboxes drop here -->
                                 </div>
                             </div>
 
@@ -348,7 +360,7 @@ def index_page():
 
             function copyToClipboard(text) {
                 navigator.clipboard.writeText(text);
-                alert("Copied Target Proxy Route Route path.");
+                alert("Copied Target Proxy Route Path.");
             }
 
             async function refreshTelemetry() {
@@ -435,7 +447,7 @@ def index_page():
                 let allowed_tools = ['all'];
                 if(currentScopeMode === 'spec') {
                     const checked = Array.from(document.querySelectorAll('#specificToolsGrid input:checked')).map(el => el.value);
-                    if(checked.length === 0) return alert("Select at least one tools restriction framework configuration.");
+                    if(checked.length === 0) return alert("Select at least one validation tool pipeline mapping.");
                     allowed_tools = checked;
                 }
 
