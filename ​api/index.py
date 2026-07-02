@@ -19,6 +19,7 @@ api_keys_db: Dict[str, dict] = {}
 search_logs: List[dict] = []
 
 # Expanded Tools Blueprint Catalog
+# Contains integrated mapping targets for telemetry routing
 TOOLS_LIST = [
     {"id": "adv", "name": "Advanced Lookup", "param": "num"},
     {"id": "paytm", "name": "Paytm Lookup", "param": "num"},
@@ -40,7 +41,6 @@ TOOLS_LIST = [
     {"id": "tg", "name": "Telegram Username to Num", "param": "info"},
     {"id": "tgidinfo", "name": "Telegram ID to Num", "param": "id"},
     {"id": "numleak", "name": "Number Leak Database", "param": "num"},
-    # Integration Pipelines
     {"id": "pk", "name": "PK Database Lookup", "param": "num"},
     {"id": "name", "name": "Identity Name Search", "param": "name"},
     {"id": "aadhar", "name": "UID Verification System", "param": "num"},
@@ -69,19 +69,19 @@ async def gateway_router(tool_id: str, request: Request):
     user_key = query_params.get("key")
     
     if not user_key or user_key not in api_keys_db:
-        raise HTTPException(status_code=403, detail="Invalid API Key buy the key or enter the correct key")
+        raise HTTPException(status_code=403, detail="Invalid API Key")
     
     key_data = api_keys_db[user_key]
     
     if key_data["status"] == "suspended":
-        raise HTTPException(status_code=403, detail="API Key is suspended by admin dmm for new key @vernexzzz")
+        raise HTTPException(status_code=403, detail="API Key is suspended")
         
     expiry = datetime.datetime.strptime(key_data["expiry"], "%Y-%m-%d").date()
     if datetime.date.today() > expiry:
-        raise HTTPException(status_code=403, detail="API Key has expired dmm for buy api @vernex")
+        raise HTTPException(status_code=403, detail="API Key has expired")
         
     if key_data["uses"] >= key_data["limit"]:
-        raise HTTPException(status_code=429, detail="API Key request limit reached dmm for buy api @vernexzzz")
+        raise HTTPException(status_code=429, detail="API Key request limit reached")
         
     if "all" not in key_data["tools"] and tool_id not in key_data["tools"]:
         raise HTTPException(status_code=403, detail="This key is not authorized to use this specific tool")
