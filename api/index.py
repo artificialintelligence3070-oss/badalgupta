@@ -12,7 +12,7 @@ app = FastAPI(title="SHAYAN_EXPLORER API Gateway")
 ADMIN_USER = "vernex"
 ADMIN_PASS = "vernex@16vx"
 BASE_TARGET_URL = "https://ft-osint-api.duckdns.org/api"
-DEFAULT_UPSTREAM_KEY = "vernex-6a9dc4fdd5923c40b0aba27bf1e39e3f"
+DEFAULT_UPSTREAM_KEY = "vx-osint"
 
 # In-Memory Database State
 api_keys_db: Dict[str, dict] = {}
