@@ -6,15 +6,20 @@ from datetime import datetime
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for, session
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
+app.secret_key = os.environ.get("SECRET_KEY", os.urandom(24))
 
-DB_FILE = "api_gateway.db"
+# Setup persistent directory for SQLite on Northflank
+DB_DIR = os.environ.get("DB_DIR", ".")
+if DB_DIR != "." and not os.path.exists(DB_DIR):
+    os.makedirs(DB_DIR, exist_ok=True)
+
+DB_FILE = os.path.join(DB_DIR, "api_gateway.db")
 PRIMARY_API_KEY = "explorer16"
 BASE_API_URL = "https://ft-osint-api.duckdns.org/api"
 
 # --- BRANDING CONFIGURATION ---
 MY_NAME = "SHAYAN_EXPLORER"
-MY_URL = "https://shayan-explorer.info"  # Replace with your actual URL if needed
+MY_URL = "https://shayan-explorer.info" 
 
 # --- DATABASE SETUP ---
 def get_db_connection():
@@ -42,7 +47,7 @@ def init_db():
                 daily_limit INTEGER,
                 current_usage INTEGER DEFAULT 0,
                 last_reset_date TEXT,
-                allowed_tools TEXT, -- Comma-separated list or 'all'
+                allowed_tools TEXT,
                 is_active INTEGER DEFAULT 1
             )
         ''')
@@ -57,7 +62,7 @@ def init_db():
             )
         ''')
         
-        # Insert default administrator if not present
+        # Default administrator insert logic
         try:
             conn.execute(
                 "INSERT INTO admins (username, password) VALUES (?, ?)",
@@ -71,14 +76,9 @@ init_db()
 
 # --- HELPER FUNCTIONS ---
 def clean_response_branding(data):
-    """
-    Recursively scans the response data and swaps old branding text 
-    with your custom branding configurations.
-    """
     if isinstance(data, str):
         data = data.replace("@ftgamer2", MY_NAME)
         data = data.replace("@bornex Ultra", MY_NAME)
-        # Add replacements for specific channel links here if needed
         return data
     elif isinstance(data, dict):
         return {k: clean_response_branding(v) for k, v in data.items()}
@@ -87,10 +87,6 @@ def clean_response_branding(data):
     return data
 
 def verify_and_update_key(api_key, tool_name):
-    """
-    Validates the custom key, checks limits, handles daily usage resets, 
-    and checks tool restrictions.
-    """
     today_str = datetime.now().strftime("%Y-%m-%d")
     now = datetime.now()
     
@@ -105,7 +101,6 @@ def verify_and_update_key(api_key, tool_name):
         conn.close()
         return False, "This API key has been deactivated by the admin."
         
-    # Check Expiration
     try:
         expiry = datetime.strptime(key_info['expiry_date'], "%Y-%m-%d %H:%M")
         if now > expiry:
@@ -115,7 +110,6 @@ def verify_and_update_key(api_key, tool_name):
         conn.close()
         return False, "Internal error processing key expiration layout."
 
-    # Check/Reset Daily Usage Limit
     current_usage = key_info['current_usage']
     if key_info['last_reset_date'] != today_str:
         conn.execute("UPDATE api_keys SET current_usage = 0, last_reset_date = ? WHERE id = ?", (today_str, key_info['id']))
@@ -126,7 +120,6 @@ def verify_and_update_key(api_key, tool_name):
         conn.close()
         return False, "Daily request limit reached for this API key."
 
-    # Check Tool Accessibility
     allowed = key_info['allowed_tools']
     if allowed != 'all':
         allowed_list = [t.strip() for t in allowed.split(',')]
@@ -134,7 +127,6 @@ def verify_and_update_key(api_key, tool_name):
             conn.close()
             return False, f"This key does not have access to the [{tool_name}] tool."
 
-    # Update usage counts
     conn.execute("UPDATE api_keys SET current_usage = current_usage + 1 WHERE id = ?", (key_info['id'],))
     conn.commit()
     conn.close()
@@ -150,13 +142,13 @@ def log_request(key_name, tool, query):
         )
         conn.commit()
 
-# --- WEB DASHBOARD INTERFACE (HTML/CSS Embedded Template) ---
+# --- WEB DASHBOARD INTERFACE ---
 DASHBOARD_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>SHAYAN_EXPLORER | Admin Central Suite</title>
+    <title>SHAYAN_EXPLORER | Admin Suite</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -365,10 +357,9 @@ def create_key():
         
     name = request.form.get('key_name')
     daily_limit = request.form.get('daily_limit')
-    expiry_date = request.form.get('expiry_date')  # Formats as YYYY-MM-DDTHH:MM
+    expiry_date = request.form.get('expiry_date')
     allowed_tools = request.form.get('allowed_tools')
     
-    # Clean datetime format to standard display: YYYY-MM-DD HH:MM
     if expiry_date:
         expiry_date = expiry_date.replace('T', ' ')
         
@@ -404,17 +395,15 @@ def delete_key(key_id):
         conn.commit()
     return redirect(url_for('dashboard'))
 
-# --- CORE API ENGINE PROXY (METERED, LOGGED & RE-BRANDED) ---
+# --- CORE API ENGINE PROXY ---
 
 @app.route('/api/<tool_name>', methods=['GET'])
 def proxy_gateway(tool_name):
-    # Collect inbound verification parameters
     custom_key = request.args.get('key')
     
     if not custom_key:
         return jsonify({"status": "failed", "error": "Missing validation element [key]"}), 400
         
-    # Check what identification parameter parameter was supplied in the request string
     query_param = "None"
     forward_params = {'key': PRIMARY_API_KEY}
     
@@ -424,27 +413,20 @@ def proxy_gateway(tool_name):
             forward_params[param] = query_param
             break
 
-    # 1. Authorization & Limit Inspection Checks
     is_valid, message_or_name = verify_and_update_key(custom_key, tool_name)
     if not is_valid:
         return jsonify({"status": "failed", "error": message_or_name}), 403
 
-    # 2. Complete Search Log Registration
     log_request(message_or_name, tool_name, query_param)
 
-    # 3. Request Proxy Delegation to core node
     target_url = f"{BASE_API_URL}/{tool_name}"
     try:
         response = requests.get(target_url, params=forward_params, timeout=12)
-        
-        # Parse output data cleanly
         try:
             raw_json = response.json()
-            # 4. Filter and Inject Custom Developer Identity Signatures
             sanitized_data = clean_response_branding(raw_json)
             return jsonify(sanitized_data), response.status_code
         except ValueError:
-            # Fallback handling for basic text/raw stream updates
             sanitized_text = clean_response_branding(response.text)
             return sanitized_text, response.status_code
 
@@ -452,5 +434,6 @@ def proxy_gateway(tool_name):
         return jsonify({"status": "error", "message": "The root query engine failed to answer safely."}), 502
 
 if __name__ == '__main__':
-    # Initial execution parameters
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Binds to dynamic port dynamically assigned by Northflank
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
