@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin Dashboard - SHAYAN_EXPLORER</title>
+    <style>
+        body { background: #0b0f19; color: #e0e6ed; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
+        header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px; margin-bottom: 25px; }
+        h1, h2 { color: #00f2fe; }
+        .container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        @media(max-width: 900px) { .container { grid-template-columns: 1fr; } }
+        .card { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); padding: 20px; border-radius: 12px; backdrop-filter: blur(10px); }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 14px; }
+        th { color: #4facfe; }
+        input, button { padding: 10px; margin: 8px 0; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: #fff; border-radius: 6px; width: 100%; box-sizing: border-box; }
+        button { background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%); color: #000; font-weight: bold; cursor: pointer; border: none; }
+        button:hover { opacity: 0.9; }
+        .btn-danger { background: #ff5252; color: #fff; padding: 5px 10px; width: auto; }
+        a { color: #ff5252; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Developer Dashboard: SHAYAN_EXPLORER</h1>
+        <a href="/logout" style="background:#ff5252; color:#fff; padding:8px 15px; border-radius:6px;">Logout</a>
+    </header>
+
+    <div class="container">
+        <!-- Key Management Panel -->
+        <div class="card">
+            <h2>🔑 Key & Expiry Manager</h2>
+            <form action="/admin/add_key" method="POST">
+                <input type="text" name="key_name" placeholder="Custom Key Name (e.g. client_xyz)" required>
+                <label style="font-size:12px; color:#aaa;">Expiration Date & Time:</label>
+                <input type="datetime-local" name="expiry" required>
+                <input type="number" name="limit" placeholder="Request Limit Quota" value="500" required>
+                <button type="submit">Create / Update Key</button>
+            </form>
+
+            <h3 style="margin-top:20px;">Active Keys List</h3>
+            <table>
+                <tr><th>Key Name</th><th>Expires</th><th>Usage</th><th>Action</th></tr>
+                {% for k, data in keys.items() %}
+                <tr>
+                    <td><code>{{ k }}</code></td>
+                    <td>{{ data.expiry }}</td>
+                    <td>{{ data.used }} / {{ data.limit }}</td>
+                    <td><a href="/admin/delete_key/{{ k }}" class="btn-danger">Delete</a></td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+
+        <!-- Live Query Logs Panel -->
+        <div class="card">
+            <h2>📊 Real-time Logs History</h2>
+            <div style="max-height: 450px; overflow-y: auto;">
+                <table>
+                    <tr><th>Time</th><th>Key</th><th>Tool</th><th>Parameters</th></tr>
+                    {% for h in history %}
+                    <tr>
+                        <td style="font-size:11px; color:#888;">{{ h.time }}</td>
+                        <td><code>{{ h.key }}</code></td>
+                        <td style="color:#00f2fe;">{{ h.tool }}</td>
+                        <td style="font-size:12px; word-break: break-all;">{{ h.params }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
