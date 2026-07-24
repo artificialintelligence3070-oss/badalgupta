@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SHAYAN_EXPLORER - OSINT API Gateway</title>
+    <style>
+        body { background: #070913; color: #fff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; overflow-x: hidden; }
+        .hero { text-align: center; padding: 60px 20px; background: radial-gradient(circle at center, #1b2a4a 0%, #070913 70%); border-bottom: 1px solid rgba(255,255,255,0.05); }
+        h1 { font-size: 3rem; margin: 0; background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-shadow: 0 0 30px rgba(0,242,254,0.3); }
+        p { color: #8a99ad; font-size: 1.1rem; }
+        .container { max-width: 900px; margin: 40px auto; padding: 0 20px; }
+        .card { background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); padding: 30px; border-radius: 16px; backdrop-filter: blur(16px); box-shadow: 0 15px 35px rgba(0,0,0,0.5); transform: perspective(1000px) rotateX(1deg); transition: 0.4s ease; }
+        .card:hover { transform: perspective(1000px) rotateX(0deg) translateY(-3px); border-color: rgba(0,242,254,0.3); }
+        select, input, button { width: 100%; padding: 14px; margin: 10px 0; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 15px; box-sizing: border-box; }
+        select option { background: #0b0f19; color: #fff; }
+        button { background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%); color: #000; font-weight: bold; cursor: pointer; border: none; transition: 0.3s; }
+        button:hover { opacity: 0.9; box-shadow: 0 0 20px rgba(0,242,254,0.4); }
+        pre { background: #04060b; padding: 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); overflow-x: auto; color: #00f2fe; max-height: 300px; }
+        .admin-link { position: absolute; top: 20px; right: 20px; background: rgba(255,255,255,0.05); padding: 8px 16px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); color: #fff; text-decoration: none; font-size: 14px; }
+        .admin-link:hover { background: rgba(0,242,254,0.1); border-color: #00f2fe; }
+    </style>
+</head>
+<body>
+    <a href="/login" class="admin-link">🔐 Admin Panel</a>
+    <div class="hero">
+        <h1>SHAYAN_EXPLORER API HUB</h1>
+        <p>Next-Generation Professional OSINT Gateway & Microservices</p>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <h3 style="margin-top:0; color:#00f2fe;">🚀 Live API Tester</h3>
+            <form id="testForm">
+                <label>Select Tool Endpoint:</label>
+                <select id="toolSelect" required>
+                    {% for ep in endpoints %}
+                    <option value="{{ ep }}">{{ ep }}</option>
+                    {% endfor %}
+                </select>
+
+                <label>Your API Key:</label>
+                <input type="text" id="apiKey" value="explorer16" required>
+
+                <label>Dynamic Query Parameter (Name & Value, e.g. <code>num=9876543210</code> or <code>username=cristiano</code>):</label>
+                <div style="display:flex; gap:10px;">
+                    <input type="text" id="paramName" placeholder="Parameter Name (e.g., num, username, uid)" value="num" style="flex:1;" required>
+                    <input type="text" id="paramValue" placeholder="Parameter Value" value="9876543210" style="flex:2;" required>
+                </div>
+
+                <button type="submit">Execute Query</button>
+            </form>
+
+            <h4 style="margin-bottom:5px;">Response Output:</h4>
+            <pre id="outputResult">Select tool and execute query...</pre>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('testForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const tool = document.getElementById('toolSelect').value;
+            const key = document.getElementById('apiKey').value;
+            const pName = document.getElementById('paramName').value;
+            const pVal = document.getElementById('paramValue').value;
+
+            const output = document.getElementById('outputResult');
+            output.textContent = "Processing secure request...";
+
+            const targetUrl = `/api/${tool}?key=${encodeURIComponent(key)}&${encodeURIComponent(pName)}=${encodeURIComponent(pVal)}`;
+
+            try {
+                const res = await fetch(targetUrl);
+                const data = await res.json();
+                output.textContent = JSON.stringify(data, null, 4);
+            } catch (err) {
+                output.textContent = "Error fetching response: " + err;
+            }
+        });
+    </script>
+</body>
+</html>
